@@ -12,7 +12,7 @@ intents.message_content = True # Enable message content intent if your bot reads
 intents.members = True # Enable if your bot needs member info
 
 # Initialize the bot with a command prefix and intents
-bot = commands.Bot(command_prefix='$', intents=intents)
+bot = commands.Bot(command_prefix='eli ', intents=intents)
 
 @bot.event
 async def on_ready():
