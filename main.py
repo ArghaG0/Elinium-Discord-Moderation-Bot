@@ -43,5 +43,33 @@ async def info(ctx):
     """Gives information about the server."""
     await ctx.send(f'This server is named: {ctx.guild.name}\nIt has {len(ctx.guild.members)} members.')
 
+@bot.command(name='say')
+async def say_command(ctx, *, message_to_say: str):
+    """Makes the bot say something. Usage: eli say <your message>"""
+    if message_to_say:
+        await ctx.send(message_to_say)
+    else:
+        await ctx.send("What do you want me to say? Usage: `eli say <your message>`")
+
+@bot.tree.command(name="badgecheck", description="Checks eligibility for Active Developer Badge")
+async def badgecheck(interaction: discord.Interaction):
+    await interaction.response.send_message("Running a slash command for the Active Developer Badge!")
+
+# A crucial step for slash commands: sync them to Discord
+@bot.event
+async def on_ready():
+    print(f'{bot.user} has connected to Discord!')
+    try:
+        # Sync commands globally or to specific guilds for testing
+        # For immediate testing, syncing to a specific guild ID is faster
+        # Replace YOUR_GUILD_ID with the ID of your test server
+        # await bot.tree.sync(guild=discord.Object(id=YOUR_GUILD_ID)) # Uncomment for specific guild
+        await bot.tree.sync() # Sync globally (can take up to an hour)
+        print("Slash commands synced!")
+    except Exception as e:
+        print(f"Failed to sync slash commands: {e}")
+
+    # await bot.change_presence(activity=discord.Game(name="with Python"))
+
 # Run the bot
 bot.run(TOKEN)
