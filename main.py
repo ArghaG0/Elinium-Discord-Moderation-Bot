@@ -2,6 +2,8 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import datetime
+import asyncio
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -40,7 +42,7 @@ async def ping(ctx):
     """Responds with 'Pong!' and the bot's latency."""
     await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
 
-# --- NEW/UPDATED: Detailed Server Info Command with Embed ---
+# --- Detailed Server Info Command with Embed ---
 @bot.command(name='info')
 async def info(ctx):
     """Shows detailed information about the server."""
@@ -87,12 +89,46 @@ async def info(ctx):
 
 # --- say Command ---
 @bot.command(name='say')
-async def say_command(ctx, *, message_to_say: str):
-    """Makes the bot say something. Usage: eli say <your message>"""
+async def say_command(ctx, *, message_to_say: str = None):
+    """Makes the bot say something. Usage: eli say <your message> OR eli say (then follow the prompt)"""
+
     if message_to_say:
+        # Normal way: User provided the message directly in the command
+        #try:
+        #    await ctx.message.delete() # Optional: delete the user's command message
+       # except discord.Forbidden:
+         #   print("Bot does not have permissions to delete messages for the 'say' command.")
         await ctx.send(message_to_say)
     else:
-        await ctx.send("What do you want me to say? Usage: `eli say <your message>`")
+        # New way: User just typed 'eli say', so prompt them
+        await ctx.send("What do you want me to say?")
+
+        def check(m):
+            # This 'check' function ensures we only listen for a message from:
+            # 1. The same user who invoked the command (`ctx.author`).
+            # 2. In the same channel where the command was invoked (`ctx.channel`).
+            return m.author == ctx.author and m.channel == ctx.channel
+
+        try:
+            # Wait for the next message that passes the 'check' function
+            # and timeout after 60 seconds if no message is received.
+            response_message = await bot.wait_for('message', check=check, timeout=60.0)
+
+            # Once a valid message is received, make the bot say its content
+            await ctx.send(response_message.content)
+
+            # Optional: Delete the user's response message to keep the chat clean
+           # try:
+           #     await response_message.delete()
+           # except discord.Forbidden:
+           #     print("Bot does not have permissions to delete response messages for 'say' command.")
+
+        except asyncio.TimeoutError:
+            # If the user doesn't respond within 60 seconds
+            await ctx.send("You took too long to tell me what to say! Please try `eli say <your message>` or `eli say` again.", delete_after=10)
+        except Exception as e:
+            # Catch any other unexpected errors during the wait_for process
+            await ctx.send(f"An unexpected error occurred: {e}. Please try again.")
 
 # --- Purge Command ---
 @bot.command(name='purge')
