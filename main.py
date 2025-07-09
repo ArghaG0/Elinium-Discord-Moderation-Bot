@@ -33,16 +33,59 @@ async def on_message(message):
     # Process commands defined with @bot.command
     await bot.process_commands(message)
 
+# --- ping Command ---
+
 @bot.command(name='ping')
 async def ping(ctx):
     """Responds with 'Pong!' and the bot's latency."""
     await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
 
+# --- NEW/UPDATED: Detailed Server Info Command with Embed ---
 @bot.command(name='info')
 async def info(ctx):
-    """Gives information about the server."""
-    await ctx.send(f'This server is named: {ctx.guild.name}\nIt has {len(ctx.guild.members)} members.')
+    """Shows detailed information about the server."""
+    guild = ctx.guild # Get the guild (server) object
 
+    # Count members
+    total_members = guild.member_count
+    human_members = len([member for member in guild.members if not member.bot])
+    bot_members = len([member for member in guild.members if member.bot])
+
+    # Count channels
+    text_channels = len(guild.text_channels)
+    voice_channels = len(guild.voice_channels)
+    category_channels = len(guild.categories)
+
+    # Creation date formatting
+    created_at = guild.created_at.strftime("%A, %B %d, %Y at %H:%M:%S UTC")
+
+    # Boost information
+    boost_level = guild.premium_tier
+    boost_count = guild.premium_subscription_count
+
+    # Create the embed
+    embed = discord.Embed(
+        title=f"Information for {guild.name}",
+        description=f"Welcome to {guild.name}!",
+        color=discord.Color.blue() # You can choose any color like discord.Color.green(), 0xHEXCODE, etc.
+    )
+
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None) # Set server icon if available
+    embed.add_field(name="Owner", value=guild.owner.mention, inline=True)
+    embed.add_field(name="Server ID", value=guild.id, inline=True)
+    embed.add_field(name="Created On", value=created_at, inline=False) # False makes it take a full row
+
+    embed.add_field(name="Members", value=f"Total: {total_members}\nHumans: {human_members}\nBots: {bot_members}", inline=True)
+    embed.add_field(name="Channels", value=f"Text: {text_channels}\nVoice: {voice_channels}\nCategories: {category_channels}", inline=True)
+
+    embed.add_field(name="Boost Level", value=f"Tier {boost_level} ({boost_count} boosts)", inline=False)
+
+    embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url if bot.user.avatar else None) # Set bot's name and icon
+
+    await ctx.send(embed=embed)
+
+# --- say Command ---
 @bot.command(name='say')
 async def say_command(ctx, *, message_to_say: str):
     """Makes the bot say something. Usage: eli say <your message>"""
@@ -50,6 +93,29 @@ async def say_command(ctx, *, message_to_say: str):
         await ctx.send(message_to_say)
     else:
         await ctx.send("What do you want me to say? Usage: `eli say <your message>`")
+
+# --- Purge Command ---
+@bot.command(name='purge')
+@commands.has_permissions(manage_messages=True) # Requires bot and user to have manage_messages permission
+async def purge(ctx, amount: int):
+    """Deletes a specified number of messages. Usage: eli purge <amount>
+    Requires 'Manage Messages' permission."""
+    if amount <= 0:
+        await ctx.send("Please provide a number greater than 0.")
+        return
+
+    # Delete the command message itself
+    await ctx.message.delete()
+
+    try:
+        # Fetch and delete messages
+        deleted = await ctx.channel.purge(limit=amount)
+        await ctx.send(f'Successfully deleted {len(deleted)} messages.', delete_after=5) # ephemeral message
+    except discord.Forbidden:
+        await ctx.send("I don't have permission to delete messages here. Please grant me 'Manage Messages'.")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while deleting messages: {e}")
+
 
 @bot.tree.command(name="badgecheck", description="Checks eligibility for Active Developer Badge")
 async def badgecheck(interaction: discord.Interaction):
