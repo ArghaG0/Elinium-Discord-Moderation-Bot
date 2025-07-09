@@ -69,7 +69,7 @@ async def info(ctx):
     embed = discord.Embed(
         title=f"Information for {guild.name}",
         description=f"Welcome to {guild.name}!",
-        color=discord.Color.blue() # You can choose any color like discord.Color.green(), 0xHEXCODE, etc.
+        color=0xD9A299 # Using the D9A299 from your palette
     )
 
     embed.set_thumbnail(url=guild.icon.url if guild.icon else None) # Set server icon if available
