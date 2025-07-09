@@ -25,14 +25,28 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    """Called every time a message is sent in any channel the bot can see."""
+    # Ignore messages from the bot itself
     if message.author == bot.user:
-        return # Don't let the bot respond to its own messages
+        return
 
+    # Check for direct 'hello'
     if message.content.lower() == 'hello':
         await message.channel.send(f'Hello, {message.author.mention}!')
+        # Important: if the bot responds to 'hello', we might not want it to process commands
+        # so adding 'return' here is an option if 'hello' should be exclusive.
+        # For now, let's allow it to pass through to process_commands as well.
 
-    # Process commands defined with @bot.command
+    # --- NEW: Check for exact 'eli' mention ---
+    # We check if the message content, converted to lowercase, is exactly 'eli'
+    if message.content.lower() == 'eli':
+        await message.channel.send(f'Hello {message.author.mention}, how may I help you?')
+        # If we respond here, we might want to prevent it from also trying to
+        # process this as a command (which it wouldn't anyway if it's just 'eli' and your prefix is 'eli ').
+        # Adding a 'return' here would stop further processing for just 'eli'.
+        # Let's add 'return' for clear behavior.
+        return # Stop processing if we responded to 'eli'
+
+    # Process commands (like 'eli ping', 'eli info', etc.)
     await bot.process_commands(message)
 
 # --- ping Command ---
