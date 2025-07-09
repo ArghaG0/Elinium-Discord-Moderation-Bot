@@ -1,0 +1,13 @@
+# Python specific
+__pycache__/
+*.pyc
+*.log
+
+# Environment files (VERY IMPORTANT!)
+.env
+venv/
+env/
+
+# Operating System specific
+.DS_Store # macOS
+Thumbs.db # Windows
