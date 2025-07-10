@@ -115,6 +115,7 @@ intents.members = True # Enable if your bot needs member info
 
 # Initialize the bot with a command prefix and intents
 bot = commands.Bot(command_prefix='eli ', intents=intents)
+bot.remove_command('help')
 
 @bot.event
 async def on_ready():
@@ -546,7 +547,7 @@ async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason prov
 @bot.command(name='unban')
 @commands.has_permissions(ban_members=True) # User needs Ban Members permission
 async def unban_user(ctx, *, user_input: str):
-    """Unbans a user from the server. Usage: eli unban <user_id_or_name#discriminator> [reason]
+    """Unbans a user from the server. Usage: eli unban <user_id_or_name#discriminator>
     Requires 'Ban Members' permission."""
 
     # Check if the bot has sufficient permissions
@@ -561,17 +562,29 @@ async def unban_user(ctx, *, user_input: str):
         await ctx.send(f"Could not find a banned user matching `{user_input}`. Please use their User ID or exact Username#Discriminator.")
         return
 
+    # Define the reason for the unban (used in Discord's audit logs)
     reason = f"Unbanned by {ctx.author.name}#{ctx.author.discriminator} ({ctx.author.id})."
 
     try:
         await ctx.guild.unban(user_to_unban, reason=reason)
         await ctx.send(f'Successfully unbanned {user_to_unban.mention} ({user_to_unban.id}).')
         print(f"Unbanned {user_to_unban.name} ({user_to_unban.id}) from {ctx.guild.name}.")
-        # Try to DM the unbanned user (often fails as they might not be in a shared server or have DMs closed)
+
+        # --- NEW: Try to DM the unbanned user ---
         try:
-            await user_to_unban.send(f"You have been unbanned from **{ctx.guild.name}**.")
+            dm_message = f"You have been unbanned from **{ctx.guild.name}**. You may now rejoin the server."
+            # Optionally, if you want to give a reason for unban, add it here:
+            # dm_message += f"\nReason for unban: {reason_for_dm}" # You'd need another reason parameter
+            await user_to_unban.send(dm_message)
+            print(f"DM sent to {user_to_unban.name} after unban.")
         except discord.Forbidden:
-            print(f"Could not DM {user_to_unban.name} after unban (DMs forbidden).")
+            # This is common if the bot doesn't share another server with the user
+            # or if the user has DMs disabled from server members.
+            print(f"Could not DM {user_to_unban.name} after unban (DMs forbidden or no mutual guilds).")
+        except Exception as dm_e:
+            print(f"An unexpected error occurred while DMing {user_to_unban.name} after unban: {dm_e}")
+        # --- END NEW DM ---
+
     except discord.Forbidden:
         await ctx.send("I don't have permission to unban members. Please grant me 'Ban Members'.")
     except discord.HTTPException as e:
@@ -661,6 +674,59 @@ async def unmute_user(ctx, member: discord.Member, *, reason: str = "No reason p
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {e}")
         print(f"Unexpected error in unmute: {e}")
+
+# --- Commands List Command ---
+@bot.command(name='cmds', aliases=['help', 'commands'])
+async def list_commands(ctx):
+    """Displays a list of all available commands."""
+
+    embed = discord.Embed(
+        title="🤖 Eli Bot Commands",
+        description="Here's a list of commands you can use with Eli Bot. "
+                    "My prefix is `eli`.",
+        color=0xADD8E6 # A light blue color for this embed
+    )
+    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
+    embed.set_footer(
+        text=f"Requested by {ctx.author.name}", # Removed mention of 'more info' as there are no descriptions
+        icon_url=ctx.author.avatar.url if ctx.author.avatar else None
+    )
+
+    general_cmds = []
+    moderation_cmds = []
+
+    # Iterate through all commands registered with the bot
+    for command in bot.commands:
+        # Skip hidden commands
+        if command.hidden:
+            continue
+
+        # --- NEW LOGIC: Just format the command name ---
+        formatted_cmd_name = f"**`{bot.command_prefix}{command.name}`**"
+
+        # Categorize based on command name
+        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands']:
+            general_cmds.append(formatted_cmd_name)
+        elif command.name in ['purge', 'warn', 'mute', 'unmute', 'kick', 'ban', 'unban', 'warnings']:
+            moderation_cmds.append(formatted_cmd_name)
+        # Add more categories here if you introduce more command types later
+
+    # Add fields for each category
+    if general_cmds:
+        embed.add_field(
+            name="General Commands",
+            value="\n".join(general_cmds),
+            inline=False
+        )
+
+    if moderation_cmds:
+        embed.add_field(
+            name="Moderation Commands",
+            value="\n".join(moderation_cmds),
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
 
 
 @bot.tree.command(name="badgecheck", description="Checks eligibility for Active Developer Badge")
