@@ -39,6 +39,7 @@ BLACKLISTED_LINKS = [
 # --- END Automod Blacklists ---
 
 WARNINGS_FILE = 'warnings.json'
+MODLOG_SETTINGS_FILE = 'modlog_settings.json'
 
 # --- Emojis for Embed Decorations ---
 EMOJI_SPARKLE = "<a:80524pinkstars:1392781611623514173>"
@@ -50,6 +51,101 @@ EMOJI_CROWN = "<:26985whitecrown:1392780685592231936>"
 EMOJI_MANYBUTTERFLIES = "<a:65954pinkbutterflies:1392780618018066512>"
 EMOJI_BUTTERFLY = "<a:95526butterflypink:1392781803093233765>"
 # --- END Emojis ---
+
+def load_modlog_settings():
+    """Loads modlog channel IDs from a JSON file."""
+    if os.path.exists(MODLOG_SETTINGS_FILE):
+        with open(MODLOG_SETTINGS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_modlog_settings(settings):
+    """Saves modlog channel IDs to a JSON file."""
+    with open(MODLOG_SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=4)
+
+# --- NEW: Send Modlog Embed Helper Function ---
+async def send_modlog_embed(bot_instance, guild, action_type, target_user, moderator, reason, **kwargs):
+    """
+    Sends a formatted moderation log embed to the designated modlog channel.
+
+    Args:
+        bot_instance: The bot instance (use `bot` variable from your main file).
+        guild (discord.Guild): The guild where the action occurred.
+        action_type (str): Type of moderation action (e.g., "Warn", "Ban", "Purge").
+        target_user (discord.User or discord.Member): The user affected by the action.
+        moderator (discord.Member): The moderator who took the action.
+        reason (str): The reason for the action.
+        **kwargs: Additional details like 'duration' for mute or 'message_count' for purge.
+    """
+    modlog_settings = load_modlog_settings()
+    channel_id = modlog_settings.get(str(guild.id))
+
+    if not channel_id:
+        print(f"Modlog channel not set for guild {guild.name} ({guild.id}). Skipping modlog entry.")
+        return
+
+    modlog_channel = guild.get_channel(int(channel_id))
+    if not modlog_channel:
+        print(f"Modlog channel (ID: {channel_id}) not found in guild {guild.name}. Skipping modlog entry.")
+        # Optionally, remove invalid channel ID from settings here
+        # del modlog_settings[str(guild.id)]
+        # save_modlog_settings(modlog_settings)
+        return
+
+    # Check bot's permissions to send messages in the modlog channel
+    if not modlog_channel.permissions_for(guild.me).send_messages:
+        print(f"Bot does not have permissions to send messages in modlog channel {modlog_channel.name} ({modlog_channel.id}). Skipping modlog entry.")
+        # Optionally, send a message to the ctx.channel if bot lacks modlog send permissions
+        # await ctx.send(f"Warning: I don't have permission to send messages in the configured modlog channel ({modlog_channel.mention}).")
+        return
+
+    # Define colors for different action types
+    color_map = {
+        "Warn": 0xFFA500,  # Orange
+        "Mute": 0xFF8C00,  # Dark Orange
+        "Unmute": 0x32CD32, # Lime Green
+        "Kick": 0xFF4500,  # Orange Red
+        "Ban": 0xDC143C,   # Crimson Red
+        "Unban": 0x228B22, # Forest Green
+        "Purge": 0x4169E1  # Royal Blue
+    }
+    embed_color = color_map.get(action_type, 0x808080) # Default grey if action type not mapped
+
+    embed = discord.Embed(
+        title=f"{EMOJI_CROWN} Modlog: {action_type} {EMOJI_CROWN}",
+        color=embed_color,
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    embed.add_field(name=f"{EMOJI_RIBBON} User", value=target_user.mention, inline=False)
+    embed.add_field(name=f"{EMOJI_HEART} User ID", value=target_user.id, inline=True)
+    # Check if target_user has a discriminator (true for discord.User and discord.Member)
+    if hasattr(target_user, 'discriminator') and target_user.discriminator != '0': # Discord changed to no discriminator for new users
+        embed.add_field(name=f"{EMOJI_STAR} Username", value=str(target_user), inline=True)
+    else: # For new Discord usernames without discriminator
+        embed.add_field(name=f"{EMOJI_STAR} Username", value=target_user.name, inline=True)
+
+
+    embed.add_field(name=f"{EMOJI_FLOWER} Moderator", value=moderator.mention, inline=False)
+    embed.add_field(name=f"{EMOJI_SPARKLE} Reason", value=reason if reason else "No reason provided.", inline=False)
+
+    # Add extra details based on action type
+    if action_type == "Mute" and 'duration' in kwargs:
+        embed.add_field(name=f"🕰️ Duration", value=kwargs['duration'], inline=False)
+    elif action_type == "Purge" and 'message_count' in kwargs:
+        embed.add_field(name=f"🗑️ Messages Deleted", value=kwargs['message_count'], inline=False)
+
+    embed.set_footer(text=f"Server: {guild.name}", icon_url=guild.icon.url if guild.icon else None)
+
+    try:
+        await modlog_channel.send(embed=embed)
+    except discord.HTTPException as e:
+        print(f"Failed to send modlog embed to channel {modlog_channel.name} ({modlog_channel.id}) in guild {guild.name}: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred while sending modlog for guild {guild.name}: {e}")
+
+# --- END NEW Modlog Helper Function ---
 
 # --- Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
 def parse_duration(duration_str: str) -> datetime.timedelta:
@@ -282,25 +378,57 @@ async def say_command(ctx, *, message_to_say: str = None):
 
 # --- Purge Command ---
 @bot.command(name='purge')
-@commands.has_permissions(manage_messages=True) # Requires bot and user to have manage_messages permission
-async def purge(ctx, amount: int):
+@commands.has_permissions(manage_messages=True)
+async def purge_messages(ctx, amount: int):
     """Deletes a specified number of messages. Usage: eli purge <amount>
     Requires 'Manage Messages' permission."""
     if amount <= 0:
-        await ctx.send("Please provide a number greater than 0.")
+        await ctx.send(f"{EMOJI_SPARKLE} Please specify a positive number of messages to delete. {EMOJI_SPARKLE}")
         return
 
-    # Delete the command message itself
-    await ctx.message.delete()
-
     try:
-        # Fetch and delete messages
-        deleted = await ctx.channel.purge(limit=amount)
-        await ctx.send(f'Successfully deleted {len(deleted)} messages.', delete_after=5) # ephemeral message
+        deleted = await ctx.channel.purge(limit=amount + 1) # +1 to also delete the purge command itself
+        deleted_count = len(deleted) - 1 # Exclude the command message itself
+        if deleted_count < 0: deleted_count = 0 # Ensure not negative if only command was deleted
+
+        embed = discord.Embed(
+            title=f"{EMOJI_RIBBON} Messages Purged! {EMOJI_RIBBON}",
+            description=f"{EMOJI_SPARKLE} Successfully deleted {deleted_count} messages in {ctx.channel.mention}.",
+            color=0x4169E1 # Royal Blue
+        )
+        embed.set_footer(text=f"Purged by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+        await ctx.send(embed=embed, delete_after=5) # Send confirmation, delete after 5 seconds
+
+        print(f"Purged {deleted_count} messages in {ctx.channel.name} by {ctx.author.name}.")
+
+        # --- NEW: Call modlog function for purge ---
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Purge",
+            ctx.author, # The purger is the target in this context
+            ctx.author, # The purger is also the moderator
+            f"Purged {deleted_count} messages.",
+            message_count=deleted_count # Pass message count as extra detail
+        )
+        # --- END NEW ---
+
     except discord.Forbidden:
-        await ctx.send("I don't have permission to delete messages here. Please grant me 'Manage Messages'.")
-    except discord.HTTPException as e:
-        await ctx.send(f"An error occurred while deleting messages: {e}")
+        await ctx.send(f"{EMOJI_CROWN} I don't have permission to manage messages in this channel. Please grant me 'Manage Messages'. {EMOJI_CROWN}")
+        print(f"Bot lacks permissions to purge messages in {ctx.channel.name}.")
+    except Exception as e:
+        await ctx.send(f"{EMOJI_HEART} An unexpected error occurred: {e} {EMOJI_HEART}")
+        print(f"Error purging messages: {e}")
+
+@purge_messages.error
+async def purge_messages_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send(f"{EMOJI_CROWN} You don't have permission to purge messages. You need the 'Manage Messages' permission. {EMOJI_CROWN}")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"{EMOJI_SPARKLE} Please specify the number of messages to delete. Usage: `eli purge <amount>` {EMOJI_SPARKLE}")
+    else:
+        await ctx.send(f"{EMOJI_HEART} An error occurred: {error} {EMOJI_HEART}")
+        print(f"Error in purge: {error}")
 
 # --- Warn Command ---
 @bot.command(name='warn')
@@ -363,6 +491,16 @@ async def warn_user(ctx, member: discord.Member, *, reason: str = "No reason pro
         })
         save_warnings(warnings_data)
         # --- Save warning | End ---
+
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Warn",
+            member,
+            ctx.author,
+            reason
+        )
 
     except discord.Forbidden:
         await ctx.send(f"Warned {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
@@ -517,6 +655,16 @@ async def kick_user(ctx, member: discord.Member, *, reason: str = "No reason pro
         await ctx.send(f'{member.mention} has been kicked for: {reason}')
         print(f"Kicked {member.name} from {ctx.guild.name} for: {reason}.")
 
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Kick",
+            member,
+            ctx.author,
+            reason
+        )
+
     except discord.Forbidden:
         await ctx.send(f"I don't have permission to kick members. Please grant me 'Kick Members'.")
         print(f"Bot lacks permissions to kick {member.name}.")
@@ -574,6 +722,16 @@ async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason prov
         await member.ban(reason=reason) # Perform the ban
         await ctx.send(f'{member.mention} has been banned for: {reason}')
         print(f"Banned {member.name} from {ctx.guild.name} for: {reason}.")
+
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Ban",
+            member,
+            ctx.author,
+            reason
+        )
 
     except discord.Forbidden:
         await ctx.send(f"I don't have permission to ban members. Please grant me 'Ban Members'.")
@@ -639,6 +797,16 @@ async def unban_user(ctx, user_id_or_name: str, *, reason: str = "No reason prov
 
         await ctx.send(f'{user_to_unban.name} has been unbanned. Reason: {reason}')
         print(f"Unbanned {user_to_unban.name} from {ctx.guild.name} for: {reason}.")
+
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Unban",
+            user_to_unban, # Use user_to_unban as the target
+            ctx.author,
+            reason
+        )
 
     except discord.Forbidden:
         await ctx.send(f"I don't have permission to unban members. Please grant me 'Ban Members'.")
@@ -727,6 +895,17 @@ async def mute_user(ctx, member: discord.Member, duration: str, *, reason: str =
         await ctx.send(f'{member.mention} has been timed out for {duration_str} for: {reason}')
         print(f"Timed out {member.name} in {ctx.guild.name} for {duration_str} for: {reason}")
 
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Mute",
+            member,
+            ctx.author,
+            reason,
+            duration=duration_str # Pass the human-readable duration
+        )
+
     except ValueError as ve:
         await ctx.send(f"Error: {ve}. Please use formats like `5s`, `10m`, `1h`, `3d`.")
     except discord.Forbidden:
@@ -777,6 +956,16 @@ async def unmute_user(ctx, member: discord.Member, *, reason: str = "No reason p
         await ctx.send(f'{member.mention} has been untimed out. Reason: {reason}')
         print(f"Untimed out {member.name} in {ctx.guild.name}. Reason: {reason}")
 
+        # Call modlog function
+        await send_modlog_embed(
+            bot, # Pass your bot instance here
+            ctx.guild,
+            "Unmute",
+            member,
+            ctx.author,
+            reason
+        )
+
     except discord.Forbidden:
         await ctx.send(f"I don't have permission to untimeout members. Please grant me 'Moderate Members'.")
         print(f"Bot lacks permissions to untimeout {member.name}.")
@@ -786,6 +975,36 @@ async def unmute_user(ctx, member: discord.Member, *, reason: str = "No reason p
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {e}")
         print(f"Unexpected error in unmute: {e}")
+
+# ----- SetModLogChannel command -----
+@bot.command(name='setmodlogchannel')
+@commands.has_permissions(manage_guild=True)
+async def set_modlog_channel(ctx, channel: discord.TextChannel):
+    """Sets the channel for moderation logs. Usage: eli setmodlogchannel #channel-name
+    Requires 'Manage Server' permission."""
+    modlog_settings = load_modlog_settings()
+    modlog_settings[str(ctx.guild.id)] = str(channel.id)
+    save_modlog_settings(modlog_settings)
+
+    embed = discord.Embed(
+        title=f"{EMOJI_RIBBON} Modlog Channel Set! {EMOJI_RIBBON}",
+        description=f"Moderation logs will now be sent to {channel.mention}.",
+        color=0x98FB98 # Pale Green
+    )
+    embed.set_footer(text=f"Set by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    await ctx.send(embed=embed)
+    print(f"Modlog channel set to {channel.name} ({channel.id}) for guild {ctx.guild.name}.")
+
+# ---- SetModLog Error ----
+@set_modlog_channel.error
+async def set_modlog_channel_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send(f"{EMOJI_CROWN} You don't have permission to set the modlog channel. You need the 'Manage Server' permission. {EMOJI_CROWN}")
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send(f"{EMOJI_SPARKLE} Please mention a valid text channel. Usage: `eli setmodlogchannel #channel-name` {EMOJI_SPARKLE}")
+    else:
+        await ctx.send(f"{EMOJI_HEART} An error occurred: {error} {EMOJI_HEART}")
+        print(f"Error in set_modlog_channel: {error}")
 
 # --- Commands List Command ---
 @bot.command(name='cmds', aliases=['help', 'commands'])
