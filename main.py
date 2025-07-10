@@ -40,14 +40,16 @@ BLACKLISTED_LINKS = [
 
 WARNINGS_FILE = 'warnings.json'
 
-# --- NEW: Emojis for Embed Decorations ---
-EMOJI_SPARKLE = "✨"
-EMOJI_HEART = "💖"
-EMOJI_RIBBON = "🎀"
-EMOJI_STAR = "🌟"
-EMOJI_FLOWER = "🌸"
-EMOJI_CROWN = "👑"
-# --- END NEW Emojis ---
+# --- Emojis for Embed Decorations ---
+EMOJI_SPARKLE = "<a:80524pinkstars:1392781611623514173>"
+EMOJI_HEART = "<:32562pinkheart:1392780764835217408>"
+EMOJI_RIBBON = "<:22499bow:1392780501886177380>"
+EMOJI_STAR = "<a:Pinkstar:1392784692138217543>"
+EMOJI_FLOWER = "<:CherryBlossom:1392784047234748417>"
+EMOJI_CROWN = "<:26985whitecrown:1392780685592231936>"
+EMOJI_MANYBUTTERFLIES = "<a:65954pinkbutterflies:1392780618018066512>"
+EMOJI_BUTTERFLY = "<a:95526butterflypink:1392781803093233765>"
+# --- END Emojis ---
 
 # --- Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
 def parse_duration(duration_str: str) -> datetime.timedelta:
@@ -210,18 +212,18 @@ async def server_info(ctx):
     embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
 
     # General Server Info
-    embed.add_field(name=f"{EMOJI_RIBBON} Server ID", value=guild.id, inline=True)
-    embed.add_field(name=f"{EMOJI_FLOWER} Owner", value=guild.owner.mention, inline=True)
-    embed.add_field(name=f"{EMOJI_SPARKLE} Created On", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
+    embed.add_field(name=f"Server ID {EMOJI_RIBBON}", value=guild.id, inline=True)
+    embed.add_field(name=f"Owner {EMOJI_FLOWER}", value=guild.owner.mention, inline=True)
+    embed.add_field(name=f"Created On {EMOJI_SPARKLE}", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
 
     # Members & Channels
-    embed.add_field(name=f"{EMOJI_HEART} Members", value=guild.member_count, inline=True)
-    embed.add_field(name=f"{EMOJI_STAR} Channels", value=len(guild.channels), inline=True)
-    embed.add_field(name=f"{EMOJI_RIBBON} Roles", value=len(guild.roles), inline=True)
+    embed.add_field(name=f"Members {EMOJI_HEART}", value=guild.member_count, inline=True)
+    embed.add_field(name=f"Channels {EMOJI_STAR}", value=len(guild.channels), inline=True)
+    embed.add_field(name=f"Roles {EMOJI_RIBBON}", value=len(guild.roles), inline=True)
 
     # Features and Boosts
-    embed.add_field(name=f"{EMOJI_CROWN} Boost Level", value=guild.premium_tier, inline=True)
-    embed.add_field(name=f"{EMOJI_SPARKLE} Boosts", value=guild.premium_subscription_count, inline=True)
+    embed.add_field(name=f"Boost Level {EMOJI_CROWN}", value=guild.premium_tier, inline=True)
+    embed.add_field(name=f"Boosts {EMOJI_SPARKLE}", value=guild.premium_subscription_count, inline=True)
     # Convert Discord's VerificationLevel enum to a readable string
     verification_level_map = {
         discord.VerificationLevel.none: "None",
@@ -230,7 +232,7 @@ async def server_info(ctx):
         discord.VerificationLevel.high: "High (10 Mins)",
         discord.VerificationLevel.highest: "Highest (Phone)"
     }
-    embed.add_field(name=f"🔒 Verification Level", value=verification_level_map.get(guild.verification_level, "Unknown"), inline=True)
+    embed.add_field(name=f"<:lock_IDS:1392785385675034774> Verification Level", value=verification_level_map.get(guild.verification_level, "Unknown"), inline=True)
 
 
     await ctx.send(embed=embed)
@@ -422,7 +424,7 @@ async def show_warnings(ctx, member: discord.Member):
 
     # Embed for warnings found
     embed = discord.Embed(
-        title=f"{EMOJI_RIBBON} Warnings for {member.display_name} ({len(user_warnings)} total) {EMOJI_RIBBON}", # Using global EMOJI_RIBBON
+        title=f"{EMOJI_MANYBUTTERFLIES} Warnings for {member.display_name} ({len(user_warnings)} total) {EMOJI_MANYBUTTERFLIES}", # Using global EMOJI_RIBBON
         color=0xDCC5B2
     )
     embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
@@ -456,7 +458,7 @@ async def show_warnings(ctx, member: discord.Member):
                 pass
 
         embed.add_field(
-            name=f"{EMOJI_SPARKLE} Warning #{i}", # Using global EMOJI_SPARKLE
+            name=f"{EMOJI_BUTTERFLY} Warning #{i}", # Using global EMOJI_SPARKLE
             value=(
                 f"**Reason:** {reason}\n"
                 f"**Moderator:** {moderator_name}\n"
