@@ -13,12 +13,26 @@ BAD_WORDS = [
     "motherfucker",
     "bitch",
     "dick",
+    "slut",
+    "mofo",
+    "bitchass",
+    "dickhead",
+    "motherchod",
+    "bkl",
+    "vagina",
+    "nigga",
+    "nigger",
+    "bokachoda",
+    "behenchod",
+    "chut",
+    "chutiya",
     # Add more words (in lowercase) that you want to block
 ]
 
 BLACKLISTED_LINKS = [
     "discord.gg",
     "instagram.com",
+    "youtu.be",
     # Add more domain names or specific URLs (in lowercase) that you want to block
 ]
 # --- END Automod Blacklists ---
