@@ -8,6 +8,21 @@ import asyncio
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+# --- Automod Blacklists ---
+BAD_WORDS = [
+    "motherfucker",
+    "bitch",
+    "dick",
+    # Add more words (in lowercase) that you want to block
+]
+
+BLACKLISTED_LINKS = [
+    "discord.gg",
+    "instagram.com",
+    # Add more domain names or specific URLs (in lowercase) that you want to block
+]
+# --- END Automod Blacklists ---
+
 # Define intents (important for modern Discord bots)
 intents = discord.Intents.default()
 intents.message_content = True # Enable message content intent if your bot reads messages
@@ -28,6 +43,35 @@ async def on_message(message):
     # Ignore messages from the bot itself
     if message.author == bot.user:
         return
+    
+    # --- Automoderation Logic ---
+    message_content_lower = message.content.lower()
+
+    # Check for bad words
+    for word in BAD_WORDS:
+        if word in message_content_lower:
+            try:
+                await message.delete()
+                # You can send a public warning or DM the user
+                await message.channel.send(f'{message.author.mention}, that word is not allowed here!', delete_after=5)
+                print(f"Deleted message from {message.author} containing forbidden word: '{word}' in '{message.content}'")
+            except discord.Forbidden:
+                print(f"ERROR: Bot does not have 'Manage Messages' permission to delete messages in {message.channel.name}")
+                await message.channel.send("I need 'Manage Messages' permission to enforce word filters!", delete_after=10)
+            return # Stop processing if a bad word is found and handled
+
+    # Check for blacklisted links
+    for link in BLACKLISTED_LINKS:
+        if link in message_content_lower:
+            try:
+                await message.delete()
+                await message.channel.send(f'{message.author.mention}, that link is not allowed here!', delete_after=5)
+                print(f"Deleted message from {message.author} containing blacklisted link: '{link}' in '{message.content}'")
+            except discord.Forbidden:
+                print(f"ERROR: Bot does not have 'Manage Messages' permission to delete messages in {message.channel.name}")
+                await message.channel.send("I need 'Manage Messages' permission to enforce link filters!", delete_after=10)
+            return # Stop processing if a blacklisted link is found and handled
+    # --- END Automoderation Logic ---
 
     # Check for direct 'hello'
     if message.content.lower() == 'hello':
