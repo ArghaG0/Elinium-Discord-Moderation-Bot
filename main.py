@@ -492,17 +492,32 @@ async def kick_user(ctx, member: discord.Member, *, reason: str = "No reason pro
         return
 
     try:
-        # Try to DM the user before kicking
-        dm_message = f"You have been kicked from **{ctx.guild.name}** for: {reason}"
-        await member.send(dm_message)
-        await member.kick(reason=reason)
+        # Try to DM the user with an embed BEFORE kicking
+        try:
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_HEART} You have been Kicked! {EMOJI_HEART}",
+                description=(
+                    f"From **{ctx.guild.name}**:\n"
+                    f"{EMOJI_SPARKLE} **Reason:** {reason}\n"
+                    f"{EMOJI_RIBBON} **Moderator:** {ctx.author.mention}"
+                ),
+                color=0xFFB6C1
+            )
+            dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+            await member.send(embed=dm_embed)
+            print(f"DM sent to {member.name} before kick.")
+        except discord.Forbidden:
+            print(f"Could not DM {member.name} before kick (DMs forbidden or no mutual guilds).")
+        except Exception as dm_e:
+            print(f"An unexpected error occurred while DMing {member.name} before kick: {dm_e}")
+
+        await member.kick(reason=reason) # Perform the kick
         await ctx.send(f'{member.mention} has been kicked for: {reason}')
-        print(f"Kicked {member.name} from {ctx.guild.name} for: {reason}")
+        print(f"Kicked {member.name} from {ctx.guild.name} for: {reason}.")
+
     except discord.Forbidden:
-        # If DM fails (e.g., user has DMs disabled), still try to kick
-        await member.kick(reason=reason)
-        await ctx.send(f"Kicked {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
-        print(f"Kicked {member.name}, but failed to DM (Forbidden).")
+        await ctx.send(f"I don't have permission to kick members. Please grant me 'Kick Members'.")
+        print(f"Bot lacks permissions to kick {member.name}.")
     except discord.HTTPException as e:
         await ctx.send(f"An error occurred while trying to kick {member.mention}: {e}")
         print(f"Error kicking {member.name}: {e}")
@@ -535,17 +550,32 @@ async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason prov
         return
 
     try:
-        # Try to DM the user before banning
-        dm_message = f"You have been banned from **{ctx.guild.name}** for: {reason}"
-        await member.send(dm_message)
-        await member.ban(reason=reason)
+        # Try to DM the user with an embed BEFORE banning
+        try:
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_HEART} You have been Banned! {EMOJI_HEART}",
+                description=(
+                    f"From **{ctx.guild.name}**:\n"
+                    f"{EMOJI_SPARKLE} **Reason:** {reason}\n"
+                    f"{EMOJI_RIBBON} **Moderator:** {ctx.author.mention}"
+                ),
+                color=0xFFB6C1
+            )
+            dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+            await member.send(embed=dm_embed)
+            print(f"DM sent to {member.name} before ban.")
+        except discord.Forbidden:
+            print(f"Could not DM {member.name} before ban (DMs forbidden or no mutual guilds).")
+        except Exception as dm_e:
+            print(f"An unexpected error occurred while DMing {member.name} before ban: {dm_e}")
+
+        await member.ban(reason=reason) # Perform the ban
         await ctx.send(f'{member.mention} has been banned for: {reason}')
-        print(f"Banned {member.name} from {ctx.guild.name} for: {reason}")
+        print(f"Banned {member.name} from {ctx.guild.name} for: {reason}.")
+
     except discord.Forbidden:
-        # If DM fails (e.g., user has DMs disabled), still try to ban
-        await member.ban(reason=reason)
-        await ctx.send(f"Banned {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
-        print(f"Banned {member.name}, but failed to DM (Forbidden).")
+        await ctx.send(f"I don't have permission to ban members. Please grant me 'Ban Members'.")
+        print(f"Bot lacks permissions to ban {member.name}.")
     except discord.HTTPException as e:
         await ctx.send(f"An error occurred while trying to ban {member.mention}: {e}")
         print(f"Error banning {member.name}: {e}")
@@ -555,54 +585,68 @@ async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason prov
 
 # --- Unban Command ---
 @bot.command(name='unban')
-@commands.has_permissions(ban_members=True) # User needs Ban Members permission
-async def unban_user(ctx, *, user_input: str):
-    """Unbans a user from the server. Usage: eli unban <user_id_or_name#discriminator>
+@commands.has_permissions(ban_members=True)
+async def unban_user(ctx, user_id_or_name: str, *, reason: str = "No reason provided."):
+    """Unbans a user from the server. Usage: eli unban <user_id_or_name> [reason]
+    User ID is preferred for accuracy, but also accepts username#discriminator if unique.
     Requires 'Ban Members' permission."""
 
-    # Check if the bot has sufficient permissions
-    if not ctx.guild.me.guild_permissions.ban_members:
-        await ctx.send("I don't have permission to unban members. Please grant me 'Ban Members'.")
-        return
-
-    # Find the banned user using the helper function
-    user_to_unban = await get_banned_user(ctx.guild, user_input)
-
-    if not user_to_unban:
-        await ctx.send(f"Could not find a banned user matching `{user_input}`. Please use their User ID or exact Username#Discriminator.")
-        return
-
-    # Define the reason for the unban (used in Discord's audit logs)
-    reason = f"Unbanned by {ctx.author.name}#{ctx.author.discriminator} ({ctx.author.id})."
-
     try:
-        await ctx.guild.unban(user_to_unban, reason=reason)
-        await ctx.send(f'Successfully unbanned {user_to_unban.mention} ({user_to_unban.id}).')
-        print(f"Unbanned {user_to_unban.name} ({user_to_unban.id}) from {ctx.guild.name}.")
+        # Get the banned user object
+        banned_users = [entry async for entry in ctx.guild.bans()]
+        user_to_unban = None
 
-        # --- NEW: Try to DM the unbanned user ---
+        # Loop through banned users to find a match by ID or name
+        for ban_entry in banned_users:
+            # Check by User ID (more reliable)
+            if str(ban_entry.user.id) == user_id_or_name:
+                user_to_unban = ban_entry.user
+                break
+            # Check by username#discriminator (less reliable if not unique)
+            if ban_entry.user.name == user_id_or_name or str(ban_entry.user) == user_id_or_name:
+                 user_to_unban = ban_entry.user
+                 break
+
+
+        if not user_to_unban:
+            await ctx.send(f"Could not find a banned user matching `{user_id_or_name}` in the ban list.")
+            return
+
+        # Perform the unban
+        await ctx.guild.unban(user_to_unban, reason=reason)
+
+        # Try to DM the unbanned user with an embed
         try:
-            dm_message = f"You have been unbanned from **{ctx.guild.name}**. You may now rejoin the server."
-            # Optionally, if you want to give a reason for unban, add it here:
-            # dm_message += f"\nReason for unban: {reason_for_dm}" # You'd need another reason parameter
-            await user_to_unban.send(dm_message)
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_HEART} You have been Unbanned! {EMOJI_HEART}",
+                description=(
+                    f"From **{ctx.guild.name}**:\n"
+                    f"{EMOJI_SPARKLE} You may now rejoin the server."
+                    # You could add moderator here if desired:
+                    # f"\n{EMOJI_RIBBON} **Unbanned by:** {ctx.author.mention}"
+                ),
+                color=0xFFB6C1
+            )
+            dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+            await user_to_unban.send(embed=dm_embed)
             print(f"DM sent to {user_to_unban.name} after unban.")
         except discord.Forbidden:
-            # This is common if the bot doesn't share another server with the user
-            # or if the user has DMs disabled from server members.
             print(f"Could not DM {user_to_unban.name} after unban (DMs forbidden or no mutual guilds).")
         except Exception as dm_e:
             print(f"An unexpected error occurred while DMing {user_to_unban.name} after unban: {dm_e}")
-        # --- END NEW DM ---
+
+        await ctx.send(f'{user_to_unban.name} has been unbanned. Reason: {reason}')
+        print(f"Unbanned {user_to_unban.name} from {ctx.guild.name} for: {reason}.")
 
     except discord.Forbidden:
-        await ctx.send("I don't have permission to unban members. Please grant me 'Ban Members'.")
+        await ctx.send(f"I don't have permission to unban members. Please grant me 'Ban Members'.")
+        print(f"Bot lacks permissions to unban.")
     except discord.HTTPException as e:
-        await ctx.send(f"An error occurred while trying to unban: {e}")
-        print(f"Error unbanning {user_to_unban.name}: {e}")
+        await ctx.send(f"An error occurred while trying to unban `{user_id_or_name}`: {e}")
+        print(f"Error unbanning `{user_id_or_name}`: {e}")
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {e}")
-        print(f"Unexpected error in unban: {e}")
+        print(f"Unexpected error in unban: {e}")    
 
 
 # --- Mute Command (using Discord's native Timeout) ---
@@ -630,26 +674,63 @@ async def mute_user(ctx, member: discord.Member, duration: str, *, reason: str =
         return
 
     try:
-        time_delta = parse_duration(duration) # Use the helper function
-        # Calculate when the timeout will end
-        # Discord uses UTC for timeouts, so ensure current time is UTC
+        time_delta = parse_duration(duration)
         timeout_until = datetime.datetime.now(datetime.timezone.utc) + time_delta
+
+        # Create human-readable duration_str
+        seconds = int(time_delta.total_seconds())
+        days, remainder = divmod(seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        duration_parts = []
+        if days:
+            duration_parts.append(f"{days} day{'s' if days != 1 else ''}")
+        if hours:
+            duration_parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        if minutes:
+            duration_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        if seconds and not days and not hours and not minutes:
+             duration_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+
+        if not duration_parts:
+            duration_str = "0 seconds"
+        else:
+            duration_str = ", ".join(duration_parts)
 
         # Apply timeout
         await member.timeout(timeout_until, reason=reason)
 
-        # Try to DM the user
-        dm_message = f"You have been timed out in **{ctx.guild.name}** for **{duration}** (until {timeout_until.strftime('%Y-%m-%d %H:%M:%S UTC')}) for: {reason}"
-        await member.send(dm_message)
-        await ctx.send(f'{member.mention} has been timed out for {duration} for: {reason}')
-        print(f"Timed out {member.name} in {ctx.guild.name} for {duration} for: {reason}")
+        # Try to DM the user with an embed
+        try: # This 'try' must be properly indented under the outer 'try'
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_HEART} You have been Timed Out! {EMOJI_HEART}",
+                description=(
+                    f"In **{ctx.guild.name}**:\n"
+                    f"{EMOJI_SPARKLE} **Reason:** {reason}\n"
+                    f"{EMOJI_RIBBON} **Moderator:** {ctx.author.mention}\n"
+                    f"{EMOJI_STAR} **Duration:** {duration_str} (until {timeout_until.strftime('%Y-%m-%d %H:%M:%S UTC')})"
+                ),
+                color=0xFFB6C1
+            )
+            dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+            await member.send(embed=dm_embed) # Sending the embed
+            print(f"DM sent to {member.name} after mute.")
+        except discord.Forbidden: # This 'except' must align with the inner 'try'
+            print(f"Could not DM {member.name} after mute (DMs forbidden or no mutual guilds).")
+        except Exception as dm_e: # This 'except' must align with the inner 'try'
+            print(f"An unexpected error occurred while DMing {member.name} after mute: {dm_e}")
+
+        # This send is for the public channel, also properly indented under the outer 'try'
+        await ctx.send(f'{member.mention} has been timed out for {duration_str} for: {reason}')
+        print(f"Timed out {member.name} in {ctx.guild.name} for {duration_str} for: {reason}")
 
     except ValueError as ve:
         await ctx.send(f"Error: {ve}. Please use formats like `5s`, `10m`, `1h`, `3d`.")
     except discord.Forbidden:
-        # If DM fails (e.g., user has DMs disabled), still try to timeout
-        await ctx.send(f"Timed out {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
-        print(f"Timed out {member.name}, but failed to DM (Forbidden).")
+        # This outer discord.Forbidden catches permission errors for `await member.timeout()`
+        await ctx.send(f"I don't have permission to timeout members. Please grant me 'Moderate Members'.")
+        print(f"Bot lacks permissions to timeout {member.name}.")
     except discord.HTTPException as e:
         await ctx.send(f"An error occurred while trying to timeout {member.mention}: {e}")
         print(f"Error timing out {member.name}: {e}")
@@ -671,16 +752,35 @@ async def unmute_user(ctx, member: discord.Member, *, reason: str = "No reason p
 
     try:
         await member.timeout(None, reason=reason) # Setting timeout to None removes it
-        dm_message = f"Your timeout in **{ctx.guild.name}** has been removed. Reason: {reason}"
-        await member.send(dm_message)
-        await ctx.send(f'{member.mention}\'s timeout has been removed.')
-        print(f"Removed timeout from {member.name} in {ctx.guild.name} for: {reason}")
+
+        # Try to DM the user with an embed
+        try:
+            dm_embed = discord.Embed(
+                title=f"{EMOJI_HEART} Your Timeout has been Removed! {EMOJI_HEART}",
+                description=(
+                    f"In **{ctx.guild.name}**:\n"
+                    f"{EMOJI_SPARKLE} **Reason:** {reason}\n"
+                    f"{EMOJI_RIBBON} **Moderator:** {ctx.author.mention}"
+                ),
+                color=0xFFB6C1
+            )
+            dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+            await member.send(embed=dm_embed)
+            print(f"DM sent to {member.name} after unmute.")
+        except discord.Forbidden:
+            print(f"Could not DM {member.name} after unmute (DMs forbidden or no mutual guilds).")
+        except Exception as dm_e:
+            print(f"An unexpected error occurred while DMing {member.name} after unmute: {dm_e}")
+
+        await ctx.send(f'{member.mention} has been untimed out. Reason: {reason}')
+        print(f"Untimed out {member.name} in {ctx.guild.name}. Reason: {reason}")
+
     except discord.Forbidden:
-        await ctx.send(f"Removed timeout from {member.mention}, but could not DM them (Forbidden).")
-        print(f"Removed timeout from {member.name}, but failed to DM (Forbidden).")
+        await ctx.send(f"I don't have permission to untimeout members. Please grant me 'Moderate Members'.")
+        print(f"Bot lacks permissions to untimeout {member.name}.")
     except discord.HTTPException as e:
-        await ctx.send(f"An error occurred while unmuting {member.mention}: {e}")
-        print(f"Error unmuting {member.name}: {e}")
+        await ctx.send(f"An error occurred while trying to untimeout {member.mention}: {e}")
+        print(f"Error untiming out {member.name}: {e}")
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {e}")
         print(f"Unexpected error in unmute: {e}")
