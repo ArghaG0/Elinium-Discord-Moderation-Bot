@@ -37,6 +37,36 @@ BLACKLISTED_LINKS = [
 ]
 # --- END Automod Blacklists ---
 
+# --- NEW: Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
+def parse_duration(duration_str: str) -> datetime.timedelta:
+    """Parses a duration string into a datetime.timedelta object."""
+    seconds = 0
+    duration_str = duration_str.lower() # Make it case-insensitive for units
+
+    try:
+        if duration_str.endswith('s'):
+            seconds = int(duration_str[:-1])
+        elif duration_str.endswith('m'):
+            seconds = int(duration_str[:-1]) * 60
+        elif duration_str.endswith('h'):
+            seconds = int(duration_str[:-1]) * 3600
+        elif duration_str.endswith('d'):
+            seconds = int(duration_str[:-1]) * 86400
+        else:
+            raise ValueError("Invalid duration format. Use 'Xs', 'Xm', 'Xh', or 'Xd'.")
+    except ValueError:
+        raise ValueError("Invalid duration value. Please provide a number followed by s/m/h/d.")
+
+    # Discord timeouts max out at 28 days (4 weeks)
+    max_seconds = 28 * 24 * 3600
+    if seconds > max_seconds:
+        raise ValueError("Timeout duration cannot exceed 28 days (4 weeks).")
+    if seconds <= 0:
+        raise ValueError("Duration must be positive.")
+
+    return datetime.timedelta(seconds=seconds)
+# --- END Helper function ---   
+
 # Define intents (important for modern Discord bots)
 intents = discord.Intents.default()
 intents.message_content = True # Enable message content intent if your bot reads messages
@@ -223,6 +253,210 @@ async def purge(ctx, amount: int):
         await ctx.send("I don't have permission to delete messages here. Please grant me 'Manage Messages'.")
     except discord.HTTPException as e:
         await ctx.send(f"An error occurred while deleting messages: {e}")
+
+# --- Warn Command ---
+@bot.command(name='warn')
+@commands.has_permissions(kick_members=True) # User needs Kick Members permission to use this
+async def warn_user(ctx, member: discord.Member, *, reason: str = "No reason provided."):
+    """Warns a user and DMs them the reason. Usage: eli warn <@user> [reason]
+    Requires 'Kick Members' permission."""
+    if member == ctx.author:
+        await ctx.send("You cannot warn yourself!")
+        return
+    if member == bot.user:
+        await ctx.send("Why would you warn me? I'm trying my best! 🥺")
+        return
+    if ctx.author.top_role.position <= member.top_role.position and ctx.author.id != ctx.guild.owner_id:
+        await ctx.send("You cannot warn someone with an equal or higher role than yourself!")
+        return
+    if member.id == ctx.guild.owner_id:
+        await ctx.send("You cannot warn the server owner!")
+        return
+    # Note: For 'warn', bot hierarchy doesn't strictly matter for the action itself (no API call to Discord for warn),
+    # but the checks are kept for consistency and to prevent a low-ranked bot role trying to "warn" a high-ranked user
+    # which might seem odd or imply a capability it doesn't have for real moderation actions.
+    if ctx.guild.me.top_role.position <= member.top_role.position:
+        await ctx.send("My highest role is not high enough to warn this user. Please move my role higher in server settings.")
+        return
+
+    try:
+        # Try to DM the user
+        dm_message = f"You have been warned in **{ctx.guild.name}** for: {reason}"
+        await member.send(dm_message)
+        await ctx.send(f'{member.mention} has been warned for: {reason}')
+        print(f"Warned {member.name} in {ctx.guild.name} for: {reason}")
+    except discord.Forbidden:
+        await ctx.send(f"Warned {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
+        print(f"Failed to DM {member.name} (Forbidden) during warn.")
+    except Exception as e:
+        await ctx.send(f"An error occurred while warning {member.mention}: {e}")
+        print(f"Error warning {member.name}: {e}")
+
+# --- Kick Command ---
+@bot.command(name='kick')
+@commands.has_permissions(kick_members=True) # User needs Kick Members permission to use this
+async def kick_user(ctx, member: discord.Member, *, reason: str = "No reason provided."):
+    """Kicks a member from the server. Usage: eli kick <@user> [reason]
+    Requires 'Kick Members' permission."""
+    if member == ctx.author:
+        await ctx.send("You cannot kick yourself!")
+        return
+    if member == bot.user:
+        await ctx.send("You can't kick me! I'm essential! 😠")
+        return
+    if ctx.author.top_role.position <= member.top_role.position and ctx.author.id != ctx.guild.owner_id:
+        await ctx.send("You cannot kick someone with an equal or higher role than yourself!")
+        return
+    if member.id == ctx.guild.owner_id:
+        await ctx.send("You cannot kick the server owner!")
+        return
+    # Check if bot has higher role than the member to be kicked
+    if ctx.guild.me.top_role.position <= member.top_role.position:
+        await ctx.send("My highest role is not high enough to kick this user. Please move my role higher in server settings.")
+        return
+
+    try:
+        # Try to DM the user before kicking
+        dm_message = f"You have been kicked from **{ctx.guild.name}** for: {reason}"
+        await member.send(dm_message)
+        await member.kick(reason=reason)
+        await ctx.send(f'{member.mention} has been kicked for: {reason}')
+        print(f"Kicked {member.name} from {ctx.guild.name} for: {reason}")
+    except discord.Forbidden:
+        # If DM fails (e.g., user has DMs disabled), still try to kick
+        await member.kick(reason=reason)
+        await ctx.send(f"Kicked {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
+        print(f"Kicked {member.name}, but failed to DM (Forbidden).")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while trying to kick {member.mention}: {e}")
+        print(f"Error kicking {member.name}: {e}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {e}")
+        print(f"Unexpected error in kick: {e}")
+
+
+# --- Ban Command ---
+@bot.command(name='ban')
+@commands.has_permissions(ban_members=True) # User needs Ban Members permission to use this
+async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason provided."):
+    """Bans a member from the server. Usage: eli ban <@user> [reason]
+    Requires 'Ban Members' permission."""
+    if member == ctx.author:
+        await ctx.send("You cannot ban yourself!")
+        return
+    if member == bot.user:
+        await ctx.send("Banning me? That's not very friendly! 😅")
+        return
+    if ctx.author.top_role.position <= member.top_role.position and ctx.author.id != ctx.guild.owner_id:
+        await ctx.send("You cannot ban someone with an equal or higher role than yourself!")
+        return
+    if member.id == ctx.guild.owner_id:
+        await ctx.send("You cannot ban the server owner!")
+        return
+    # Check if bot has higher role than the member to be banned
+    if ctx.guild.me.top_role.position <= member.top_role.position:
+        await ctx.send("My highest role is not high enough to ban this user. Please move my role higher in server settings.")
+        return
+
+    try:
+        # Try to DM the user before banning
+        dm_message = f"You have been banned from **{ctx.guild.name}** for: {reason}"
+        await member.send(dm_message)
+        await member.ban(reason=reason)
+        await ctx.send(f'{member.mention} has been banned for: {reason}')
+        print(f"Banned {member.name} from {ctx.guild.name} for: {reason}")
+    except discord.Forbidden:
+        # If DM fails (e.g., user has DMs disabled), still try to ban
+        await member.ban(reason=reason)
+        await ctx.send(f"Banned {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
+        print(f"Banned {member.name}, but failed to DM (Forbidden).")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while trying to ban {member.mention}: {e}")
+        print(f"Error banning {member.name}: {e}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {e}")
+        print(f"Unexpected error in ban: {e}")
+
+
+# --- Mute Command (using Discord's native Timeout) ---
+@bot.command(name='mute')
+@commands.has_permissions(moderate_members=True) # Requires 'Moderate Members' permission
+async def mute_user(ctx, member: discord.Member, duration: str, *, reason: str = "No reason provided."):
+    """Times out a member for a specified duration. Usage: eli mute <@user> <duration> [reason]
+    Duration examples: 5s, 10m, 1h, 3d (max 28 days). Requires 'Moderate Members' permission."""
+
+    if member == ctx.author:
+        await ctx.send("You cannot timeout yourself!")
+        return
+    if member == bot.user:
+        await ctx.send("I cannot be timed out! I'm already super chill. 😎")
+        return
+    if ctx.author.top_role.position <= member.top_role.position and ctx.author.id != ctx.guild.owner_id:
+        await ctx.send("You cannot timeout someone with an equal or higher role than yourself!")
+        return
+    if member.id == ctx.guild.owner_id:
+        await ctx.send("You cannot timeout the server owner!")
+        return
+    # Check if bot has higher role than the member to be timed out
+    if ctx.guild.me.top_role.position <= member.top_role.position:
+        await ctx.send("My highest role is not high enough to timeout this user. Please move my role higher in server settings.")
+        return
+
+    try:
+        time_delta = parse_duration(duration) # Use the helper function
+        # Calculate when the timeout will end
+        # Discord uses UTC for timeouts, so ensure current time is UTC
+        timeout_until = datetime.datetime.now(datetime.timezone.utc) + time_delta
+
+        # Apply timeout
+        await member.timeout(timeout_until, reason=reason)
+
+        # Try to DM the user
+        dm_message = f"You have been timed out in **{ctx.guild.name}** for **{duration}** (until {timeout_until.strftime('%Y-%m-%d %H:%M:%S UTC')}) for: {reason}"
+        await member.send(dm_message)
+        await ctx.send(f'{member.mention} has been timed out for {duration} for: {reason}')
+        print(f"Timed out {member.name} in {ctx.guild.name} for {duration} for: {reason}")
+
+    except ValueError as ve:
+        await ctx.send(f"Error: {ve}. Please use formats like `5s`, `10m`, `1h`, `3d`.")
+    except discord.Forbidden:
+        # If DM fails (e.g., user has DMs disabled), still try to timeout
+        await ctx.send(f"Timed out {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
+        print(f"Timed out {member.name}, but failed to DM (Forbidden).")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while trying to timeout {member.mention}: {e}")
+        print(f"Error timing out {member.name}: {e}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {e}")
+        print(f"Unexpected error in mute: {e}")
+
+
+# --- Unmute Command (removes Discord's native Timeout) ---
+@bot.command(name='unmute')
+@commands.has_permissions(moderate_members=True) # Requires 'Moderate Members' permission
+async def unmute_user(ctx, member: discord.Member, *, reason: str = "No reason provided."):
+    """Removes timeout from a member. Usage: eli unmute <@user> [reason]
+    Requires 'Moderate Members' permission."""
+
+    if not member.is_timed_out():
+        await ctx.send(f"{member.mention} is not currently timed out.")
+        return
+
+    try:
+        await member.timeout(None, reason=reason) # Setting timeout to None removes it
+        dm_message = f"Your timeout in **{ctx.guild.name}** has been removed. Reason: {reason}"
+        await member.send(dm_message)
+        await ctx.send(f'{member.mention}\'s timeout has been removed.')
+        print(f"Removed timeout from {member.name} in {ctx.guild.name} for: {reason}")
+    except discord.Forbidden:
+        await ctx.send(f"Removed timeout from {member.mention}, but could not DM them (Forbidden).")
+        print(f"Removed timeout from {member.name}, but failed to DM (Forbidden).")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while unmuting {member.mention}: {e}")
+        print(f"Error unmuting {member.name}: {e}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {e}")
+        print(f"Unexpected error in unmute: {e}")
 
 
 @bot.tree.command(name="badgecheck", description="Checks eligibility for Active Developer Badge")
