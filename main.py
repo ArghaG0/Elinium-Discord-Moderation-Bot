@@ -40,6 +40,15 @@ BLACKLISTED_LINKS = [
 
 WARNINGS_FILE = 'warnings.json'
 
+# --- NEW: Emojis for Embed Decorations ---
+EMOJI_SPARKLE = "✨"
+EMOJI_HEART = "💖"
+EMOJI_RIBBON = "🎀"
+EMOJI_STAR = "🌟"
+EMOJI_FLOWER = "🌸"
+EMOJI_CROWN = "👑"
+# --- END NEW Emojis ---
+
 # --- Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
 def parse_duration(duration_str: str) -> datetime.timedelta:
     """Parses a duration string into a datetime.timedelta object."""
@@ -187,47 +196,42 @@ async def ping(ctx):
     await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
 
 # --- Detailed Server Info Command with Embed ---
-@bot.command(name='info')
-async def info(ctx):
-    """Shows detailed information about the server."""
+@bot.command(name='serverinfo', aliases=['guildinfo', 'server'])
+async def server_info(ctx):
+    """Displays information about the current server."""
     guild = ctx.guild # Get the guild (server) object
 
-    # Count members
-    total_members = guild.member_count
-    human_members = len([member for member in guild.members if not member.bot])
-    bot_members = len([member for member in guild.members if member.bot])
-
-    # Count channels
-    text_channels = len(guild.text_channels)
-    voice_channels = len(guild.voice_channels)
-    category_channels = len(guild.categories)
-
-    # Creation date formatting
-    created_at = guild.created_at.strftime("%A, %B %d, %Y at %H:%M:%S UTC")
-
-    # Boost information
-    boost_level = guild.premium_tier
-    boost_count = guild.premium_subscription_count
-
-    # Create the embed
     embed = discord.Embed(
-        title=f"Information for {guild.name}",
-        description=f"Welcome to {guild.name}!",
-        color=0xD9A299 # Using the D9A299 from your palette
+        title=f"{EMOJI_CROWN} {guild.name} Server Info! {EMOJI_CROWN}", # Crown emojis for server
+        description=f"{EMOJI_HEART} All the lovely details about this cozy place! {EMOJI_HEART}", # Hearts for description
+        color=0xDCC5B2 # A warm, inviting color for server info
     )
-
-    embed.set_thumbnail(url=guild.icon.url if guild.icon else None) # Set server icon if available
-    embed.add_field(name="Owner", value=guild.owner.mention, inline=True)
-    embed.add_field(name="Server ID", value=guild.id, inline=True)
-    embed.add_field(name="Created On", value=created_at, inline=False) # False makes it take a full row
-
-    embed.add_field(name="Members", value=f"Total: {total_members}\nHumans: {human_members}\nBots: {bot_members}", inline=True)
-    embed.add_field(name="Channels", value=f"Text: {text_channels}\nVoice: {voice_channels}\nCategories: {category_channels}", inline=True)
-
-    embed.add_field(name="Boost Level", value=f"Tier {boost_level} ({boost_count} boosts)", inline=False)
-
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None) # Server icon
     embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
-    embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url if bot.user.avatar else None) # Set bot's name and icon
+
+    # General Server Info
+    embed.add_field(name=f"{EMOJI_RIBBON} Server ID", value=guild.id, inline=True)
+    embed.add_field(name=f"{EMOJI_FLOWER} Owner", value=guild.owner.mention, inline=True)
+    embed.add_field(name=f"{EMOJI_SPARKLE} Created On", value=guild.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
+
+    # Members & Channels
+    embed.add_field(name=f"{EMOJI_HEART} Members", value=guild.member_count, inline=True)
+    embed.add_field(name=f"{EMOJI_STAR} Channels", value=len(guild.channels), inline=True)
+    embed.add_field(name=f"{EMOJI_RIBBON} Roles", value=len(guild.roles), inline=True)
+
+    # Features and Boosts
+    embed.add_field(name=f"{EMOJI_CROWN} Boost Level", value=guild.premium_tier, inline=True)
+    embed.add_field(name=f"{EMOJI_SPARKLE} Boosts", value=guild.premium_subscription_count, inline=True)
+    # Convert Discord's VerificationLevel enum to a readable string
+    verification_level_map = {
+        discord.VerificationLevel.none: "None",
+        discord.VerificationLevel.low: "Low (Email)",
+        discord.VerificationLevel.medium: "Medium (5 Mins)",
+        discord.VerificationLevel.high: "High (10 Mins)",
+        discord.VerificationLevel.highest: "Highest (Phone)"
+    }
+    embed.add_field(name=f"🔒 Verification Level", value=verification_level_map.get(guild.verification_level, "Unknown"), inline=True)
+
 
     await ctx.send(embed=embed)
 
@@ -323,8 +327,17 @@ async def warn_user(ctx, member: discord.Member, *, reason: str = "No reason pro
 
     try:
         # Try to DM the user
-        dm_message = f"You have been warned in **{ctx.guild.name}** for: {reason}"
-        await member.send(dm_message)
+        dm_embed = discord.Embed(
+            title=f"{EMOJI_HEART} You have been Warned! {EMOJI_HEART}",
+            description=(
+                f"In **{ctx.guild.name}**:\n"
+                f"{EMOJI_SPARKLE} **Reason:** {reason}\n"
+                f"{EMOJI_RIBBON} **Moderator:** {ctx.author.mention}"
+            ),
+            color=0xFFB6C1 # Light Pink
+        )
+        dm_embed.set_footer(text=f"Server: {ctx.guild.name} | Bot: {bot.user.name}")
+        await member.send(embed=dm_embed) # Changed to embed
         await ctx.send(f'{member.mention} has been warned for: {reason}')
         print(f"Warned {member.name} in {ctx.guild.name} for: {reason}")
 
@@ -374,7 +387,7 @@ async def warn_user(ctx, member: discord.Member, *, reason: str = "No reason pro
 
 # --- Warnings Command ---
 @bot.command(name='warnings')
-@commands.has_permissions(kick_members=True) # User needs Kick Members permission to view warnings
+@commands.has_permissions(kick_members=True)
 async def show_warnings(ctx, member: discord.Member):
     """Shows a list of warnings for a user. Usage: eli warnings <@user>
     Requires 'Kick Members' permission."""
@@ -383,12 +396,12 @@ async def show_warnings(ctx, member: discord.Member):
     guild_id = str(ctx.guild.id)
     member_id = str(member.id)
 
-    # Check if guild has any warnings, then check for member's warnings
+    # Embed for no warnings found
     if guild_id not in warnings_data or member_id not in warnings_data[guild_id]:
         embed = discord.Embed(
-            title=f"Warnings for {member.display_name}",
-            description=f"No warnings found for {member.mention}.",
-            color=0xF0E4D3 # Using a color from your palette
+            title=f"{EMOJI_HEART} Warnings for {member.display_name} {EMOJI_HEART}", # Using global EMOJI_HEART
+            description=f"{EMOJI_SPARKLE} No warnings found for {member.mention}! {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
+            color=0xF0E4D3
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
         await ctx.send(embed=embed)
@@ -396,26 +409,26 @@ async def show_warnings(ctx, member: discord.Member):
 
     user_warnings = warnings_data[guild_id][member_id]
 
-    if not user_warnings: # Should be caught by the above, but good safeguard
+    # Redundant check, but safe. Can be removed if the above 'if' handles all no-warning cases.
+    if not user_warnings:
         embed = discord.Embed(
-            title=f"Warnings for {member.display_name}",
-            description=f"No warnings found for {member.mention}.",
+            title=f"{EMOJI_HEART} Warnings for {member.display_name} {EMOJI_HEART}", # Using global EMOJI_HEART
+            description=f"{EMOJI_SPARKLE} No warnings found for {member.mention}! {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
             color=0xF0E4D3
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
         await ctx.send(embed=embed)
         return
 
-    # Create an embed to display warnings
+    # Embed for warnings found
     embed = discord.Embed(
-        title=f"Warnings for {member.display_name} ({len(user_warnings)} total)",
-        color=0xDCC5B2 # Using another color from your palette
+        title=f"{EMOJI_RIBBON} Warnings for {member.display_name} ({len(user_warnings)} total) {EMOJI_RIBBON}", # Using global EMOJI_RIBBON
+        color=0xDCC5B2
     )
     embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
     embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url if bot.user.avatar else None)
 
 
-    # Add fields for each warning
     for i, warning in enumerate(user_warnings, 1):
         reason = warning.get("reason", "No reason provided.")
         moderator_id = warning.get("moderator_id")
@@ -424,35 +437,32 @@ async def show_warnings(ctx, member: discord.Member):
         moderator_name = "Unknown Moderator"
         if moderator_id:
             try:
-                # Try to fetch moderator by ID
                 mod_member = ctx.guild.get_member(int(moderator_id))
                 if mod_member:
                     moderator_name = mod_member.display_name
-                else: # If not in cache, try fetching by ID from API
+                else:
                     mod_user = await bot.fetch_user(int(moderator_id))
                     if mod_user:
                         moderator_name = mod_user.name
             except Exception:
-                pass # If fetching fails, stick to "Unknown Moderator"
+                pass
 
-        # Format timestamp nicely
         formatted_timestamp = "N/A"
         if timestamp_str:
             try:
                 dt_object = datetime.datetime.fromisoformat(timestamp_str)
-                # Convert to local time for display, if desired, or keep UTC
                 formatted_timestamp = dt_object.strftime("%Y-%m-%d %H:%M UTC")
             except ValueError:
                 pass
 
         embed.add_field(
-            name=f"Warning #{i}",
+            name=f"{EMOJI_SPARKLE} Warning #{i}", # Using global EMOJI_SPARKLE
             value=(
                 f"**Reason:** {reason}\n"
                 f"**Moderator:** {moderator_name}\n"
                 f"**Date:** {formatted_timestamp}"
             ),
-            inline=False # Each warning takes a full line
+            inline=False
         )
 
     embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
@@ -681,47 +691,41 @@ async def list_commands(ctx):
     """Displays a list of all available commands."""
 
     embed = discord.Embed(
-        title="🤖 Eli Bot Commands",
-        description="Here's a list of commands you can use with Eli Bot. "
-                    "My prefix is `eli`.",
-        color=0xADD8E6 # A light blue color for this embed
+        title=f"{EMOJI_HEART} Eli Bot Commands! {EMOJI_HEART}", # Using global EMOJI_HEART
+        description=f"{EMOJI_SPARKLE} Here's a list of commands you can use with Eli Bot. "
+                    f"My prefix is `eli`. {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
+        color=0xADD8E6
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
     embed.set_footer(
-        text=f"Requested by {ctx.author.name}", # Removed mention of 'more info' as there are no descriptions
+        text=f"Requested by {ctx.author.name}",
         icon_url=ctx.author.avatar.url if ctx.author.avatar else None
     )
 
     general_cmds = []
     moderation_cmds = []
 
-    # Iterate through all commands registered with the bot
     for command in bot.commands:
-        # Skip hidden commands
         if command.hidden:
             continue
 
-        # --- NEW LOGIC: Just format the command name ---
         formatted_cmd_name = f"**`{bot.command_prefix}{command.name}`**"
 
-        # Categorize based on command name
-        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands']:
+        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands', 'serverinfo', 'guildinfo', 'server']: # Added serverinfo aliases
             general_cmds.append(formatted_cmd_name)
         elif command.name in ['purge', 'warn', 'mute', 'unmute', 'kick', 'ban', 'unban', 'warnings']:
             moderation_cmds.append(formatted_cmd_name)
-        # Add more categories here if you introduce more command types later
 
-    # Add fields for each category
     if general_cmds:
         embed.add_field(
-            name="General Commands",
+            name=f"{EMOJI_FLOWER} General Commands {EMOJI_FLOWER}", # Using global EMOJI_FLOWER
             value="\n".join(general_cmds),
             inline=False
         )
 
     if moderation_cmds:
         embed.add_field(
-            name="Moderation Commands",
+            name=f"{EMOJI_CROWN} Moderation Commands {EMOJI_CROWN}", # Using global EMOJI_CROWN
             value="\n".join(moderation_cmds),
             inline=False
         )
