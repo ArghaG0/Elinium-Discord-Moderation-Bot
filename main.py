@@ -64,7 +64,7 @@ def save_modlog_settings(settings):
     with open(MODLOG_SETTINGS_FILE, 'w') as f:
         json.dump(settings, f, indent=4)
 
-# --- NEW: Send Modlog Embed Helper Function ---
+# --- Send Modlog Embed Helper Function ---
 async def send_modlog_embed(bot_instance, guild, action_type, target_user, moderator, reason, **kwargs):
     """
     Sends a formatted moderation log embed to the designated modlog channel.
@@ -102,13 +102,13 @@ async def send_modlog_embed(bot_instance, guild, action_type, target_user, moder
 
     # Define colors for different action types
     color_map = {
-        "Warn": 0xFFA500,  # Orange
-        "Mute": 0xFF8C00,  # Dark Orange
-        "Unmute": 0x32CD32, # Lime Green
-        "Kick": 0xFF4500,  # Orange Red
-        "Ban": 0xDC143C,   # Crimson Red
-        "Unban": 0x228B22, # Forest Green
-        "Purge": 0x4169E1  # Royal Blue
+        "Warn": 0xFFB6C1,  # Orange
+        "Mute": 0xFFB6C1,  # Dark Orange
+        "Unmute": 0xFFB6C1, # Lime Green
+        "Kick": 0xFFB6C1,  # Orange Red
+        "Ban": 0xFFB6C1,   # Crimson Red
+        "Unban": 0xFFB6C1, # Forest Green
+        "Purge": 0xFFB6C1  # Royal Blue
     }
     embed_color = color_map.get(action_type, 0x808080) # Default grey if action type not mapped
 
@@ -145,7 +145,7 @@ async def send_modlog_embed(bot_instance, guild, action_type, target_user, moder
     except Exception as e:
         print(f"An unexpected error occurred while sending modlog for guild {guild.name}: {e}")
 
-# --- END NEW Modlog Helper Function ---
+# --- END Modlog Helper Function ---
 
 # --- Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
 def parse_duration(duration_str: str) -> datetime.timedelta:
@@ -273,7 +273,7 @@ async def on_message(message):
         # so adding 'return' here is an option if 'hello' should be exclusive.
         # For now, let's allow it to pass through to process_commands as well.
 
-    # --- NEW: Check for exact 'eli' mention ---
+    # --- Check for exact 'eli' mention ---
     # We check if the message content, converted to lowercase, is exactly 'eli'
     if message.content.lower() == 'eli':
         await message.channel.send(f'Hello {message.author.mention}, how may I help you?')
@@ -394,7 +394,7 @@ async def purge_messages(ctx, amount: int):
         embed = discord.Embed(
             title=f"{EMOJI_RIBBON} Messages Purged! {EMOJI_RIBBON}",
             description=f"{EMOJI_SPARKLE} Successfully deleted {deleted_count} messages in {ctx.channel.mention}.",
-            color=0x4169E1 # Royal Blue
+            color=0xFFB6C1 # Royal Blue
         )
         embed.set_footer(text=f"Purged by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
         await ctx.send(embed=embed, delete_after=5) # Send confirmation, delete after 5 seconds
@@ -1012,10 +1012,10 @@ async def list_commands(ctx):
     """Displays a list of all available commands."""
 
     embed = discord.Embed(
-        title=f"{EMOJI_HEART} Eli Bot Commands! {EMOJI_HEART}", # Using global EMOJI_HEART
+        title=f"{EMOJI_HEART} Eli Bot Commands! {EMOJI_HEART}", # Using custom EMOJI_HEART
         description=f"{EMOJI_SPARKLE} Here's a list of commands you can use with Eli Bot. "
-                    f"My prefix is `eli`. {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
-        color=0xFFB6C1
+                    f"My prefix is `eli`. {EMOJI_SPARKLE}", # Using custom EMOJI_SPARKLE
+        color=0xADD8E6
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
     embed.set_footer(
@@ -1032,27 +1032,27 @@ async def list_commands(ctx):
 
         formatted_cmd_name = f"**`{bot.command_prefix}{command.name}`**"
 
-        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands', 'serverinfo', 'guildinfo', 'server']: # Added serverinfo aliases
+        # Check command name and add to appropriate list
+        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands', 'serverinfo', 'guildinfo', 'server']:
             general_cmds.append(formatted_cmd_name)
-        elif command.name in ['purge', 'warn', 'mute', 'unmute', 'kick', 'ban', 'unban', 'warnings']:
+        elif command.name in ['purge', 'warn', 'mute', 'unmute', 'kick', 'ban', 'unban', 'warnings', 'setmodlogchannel']: # ADDED setmodlogchannel here
             moderation_cmds.append(formatted_cmd_name)
 
     if general_cmds:
         embed.add_field(
-            name=f"{EMOJI_FLOWER} General Commands {EMOJI_FLOWER}", # Using global EMOJI_FLOWER
+            name=f"{EMOJI_FLOWER} General Commands {EMOJI_FLOWER}", # Using custom EMOJI_FLOWER
             value="\n".join(general_cmds),
             inline=False
         )
 
     if moderation_cmds:
         embed.add_field(
-            name=f"{EMOJI_CROWN} Moderation Commands {EMOJI_CROWN}", # Using global EMOJI_CROWN
+            name=f"{EMOJI_CROWN} Moderation Commands {EMOJI_CROWN}", # Using custom EMOJI_CROWN
             value="\n".join(moderation_cmds),
             inline=False
         )
 
     await ctx.send(embed=embed)
-
 
 @bot.tree.command(name="badgecheck", description="Checks eligibility for Active Developer Badge")
 async def badgecheck(interaction: discord.Interaction):
