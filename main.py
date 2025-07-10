@@ -206,7 +206,7 @@ async def server_info(ctx):
     embed = discord.Embed(
         title=f"{EMOJI_CROWN} {guild.name} Server Info! {EMOJI_CROWN}", # Crown emojis for server
         description=f"{EMOJI_HEART} All the lovely details about this cozy place! {EMOJI_HEART}", # Hearts for description
-        color=0xDCC5B2 # A warm, inviting color for server info
+        color=0xFFB6C1 # A warm, inviting color for server info
     )
     embed.set_thumbnail(url=guild.icon.url if guild.icon else None) # Server icon
     embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
@@ -403,7 +403,7 @@ async def show_warnings(ctx, member: discord.Member):
         embed = discord.Embed(
             title=f"{EMOJI_HEART} Warnings for {member.display_name} {EMOJI_HEART}", # Using global EMOJI_HEART
             description=f"{EMOJI_SPARKLE} No warnings found for {member.mention}! {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
-            color=0xF0E4D3
+            color=0xFFB6C1
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
         await ctx.send(embed=embed)
@@ -416,7 +416,7 @@ async def show_warnings(ctx, member: discord.Member):
         embed = discord.Embed(
             title=f"{EMOJI_HEART} Warnings for {member.display_name} {EMOJI_HEART}", # Using global EMOJI_HEART
             description=f"{EMOJI_SPARKLE} No warnings found for {member.mention}! {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
-            color=0xF0E4D3
+            color=0xFFB6C1
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
         await ctx.send(embed=embed)
@@ -425,7 +425,7 @@ async def show_warnings(ctx, member: discord.Member):
     # Embed for warnings found
     embed = discord.Embed(
         title=f"{EMOJI_MANYBUTTERFLIES} Warnings for {member.display_name} ({len(user_warnings)} total) {EMOJI_MANYBUTTERFLIES}", # Using global EMOJI_RIBBON
-        color=0xDCC5B2
+        color=0xFFB6C1
     )
     embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
     embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url if bot.user.avatar else None)
@@ -796,7 +796,7 @@ async def list_commands(ctx):
         title=f"{EMOJI_HEART} Eli Bot Commands! {EMOJI_HEART}", # Using global EMOJI_HEART
         description=f"{EMOJI_SPARKLE} Here's a list of commands you can use with Eli Bot. "
                     f"My prefix is `eli`. {EMOJI_SPARKLE}", # Using global EMOJI_SPARKLE
-        color=0xADD8E6
+        color=0xFFB6C1
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
     embed.set_footer(
