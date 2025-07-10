@@ -4,6 +4,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import datetime
 import asyncio
+import json
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -37,7 +38,9 @@ BLACKLISTED_LINKS = [
 ]
 # --- END Automod Blacklists ---
 
-# --- NEW: Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
+WARNINGS_FILE = 'warnings.json'
+
+# --- Helper function to parse duration strings (e.g., "5s", "10m", "1h", "3d") ---
 def parse_duration(duration_str: str) -> datetime.timedelta:
     """Parses a duration string into a datetime.timedelta object."""
     seconds = 0
@@ -66,6 +69,44 @@ def parse_duration(duration_str: str) -> datetime.timedelta:
 
     return datetime.timedelta(seconds=seconds)
 # --- END Helper function ---   
+
+# --- Helper functions for warnings persistence ---
+def load_warnings():
+    """Loads warning data from the JSON file."""
+    if os.path.exists(WARNINGS_FILE):
+        with open(WARNINGS_FILE, 'r', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+                # Ensure guild IDs are strings (JSON keys are always strings)
+                return {guild_id: data[guild_id] for guild_id in data}
+            except json.JSONDecodeError:
+                print(f"Warning: {WARNINGS_FILE} is corrupted or empty. Starting fresh.")
+                return {}
+    return {} # Return empty dict if file doesn't exist
+
+def save_warnings(data):
+    """Saves warning data to the JSON file."""
+    with open(WARNINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4) # indent=4 makes the JSON file human-readable
+# --- END Helper functions ---
+
+# --- Helper for unban command to find banned user ---
+async def get_banned_user(guild, user_input):
+    """Fetches a banned user by ID or username#discriminator."""
+    bans = [entry async for entry in guild.bans()] # Fetch all bans
+    
+    # Try to find by ID
+    if user_input.isdigit():
+        for ban_entry in bans:
+            if str(ban_entry.user.id) == user_input:
+                return ban_entry.user
+    # Try to find by username#discriminator (case-insensitive)
+    else:
+        for ban_entry in bans:
+            if str(ban_entry.user).lower() == user_input.lower():
+                return ban_entry.user
+    return None # User not found in ban list
+# --- END Helper for unban ---
 
 # Define intents (important for modern Discord bots)
 intents = discord.Intents.default()
@@ -285,12 +326,136 @@ async def warn_user(ctx, member: discord.Member, *, reason: str = "No reason pro
         await member.send(dm_message)
         await ctx.send(f'{member.mention} has been warned for: {reason}')
         print(f"Warned {member.name} in {ctx.guild.name} for: {reason}")
+
+        # --- Saves the warning persistently ---
+        warnings_data = load_warnings()
+        guild_id = str(ctx.guild.id)
+        member_id = str(member.id)
+        moderator_id = str(ctx.author.id)
+        # Store timestamp in ISO format for easy parsing and sorting
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        if guild_id not in warnings_data:
+            warnings_data[guild_id] = {}
+        if member_id not in warnings_data[guild_id]:
+            warnings_data[guild_id][member_id] = []
+
+        warnings_data[guild_id][member_id].append({
+            "reason": reason,
+            "moderator_id": moderator_id,
+            "timestamp": timestamp
+        })
+        save_warnings(warnings_data)
+        # --- Save warning | End ---
+
     except discord.Forbidden:
         await ctx.send(f"Warned {member.mention} for: {reason}, but could not DM them (they may have DMs disabled).")
         print(f"Failed to DM {member.name} (Forbidden) during warn.")
+        # Still save warning even if DM fails
+        warnings_data = load_warnings()
+        guild_id = str(ctx.guild.id)
+        member_id = str(member.id)
+        moderator_id = str(ctx.author.id)
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        if guild_id not in warnings_data:
+            warnings_data[guild_id] = {}
+        if member_id not in warnings_data[guild_id]:
+            warnings_data[guild_id][member_id] = []
+        warnings_data[guild_id][member_id].append({
+            "reason": reason,
+            "moderator_id": moderator_id,
+            "timestamp": timestamp
+        })
+        save_warnings(warnings_data)
     except Exception as e:
         await ctx.send(f"An error occurred while warning {member.mention}: {e}")
         print(f"Error warning {member.name}: {e}")
+
+# --- Warnings Command ---
+@bot.command(name='warnings')
+@commands.has_permissions(kick_members=True) # User needs Kick Members permission to view warnings
+async def show_warnings(ctx, member: discord.Member):
+    """Shows a list of warnings for a user. Usage: eli warnings <@user>
+    Requires 'Kick Members' permission."""
+
+    warnings_data = load_warnings()
+    guild_id = str(ctx.guild.id)
+    member_id = str(member.id)
+
+    # Check if guild has any warnings, then check for member's warnings
+    if guild_id not in warnings_data or member_id not in warnings_data[guild_id]:
+        embed = discord.Embed(
+            title=f"Warnings for {member.display_name}",
+            description=f"No warnings found for {member.mention}.",
+            color=0xF0E4D3 # Using a color from your palette
+        )
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+        await ctx.send(embed=embed)
+        return
+
+    user_warnings = warnings_data[guild_id][member_id]
+
+    if not user_warnings: # Should be caught by the above, but good safeguard
+        embed = discord.Embed(
+            title=f"Warnings for {member.display_name}",
+            description=f"No warnings found for {member.mention}.",
+            color=0xF0E4D3
+        )
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+        await ctx.send(embed=embed)
+        return
+
+    # Create an embed to display warnings
+    embed = discord.Embed(
+        title=f"Warnings for {member.display_name} ({len(user_warnings)} total)",
+        color=0xDCC5B2 # Using another color from your palette
+    )
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+    embed.set_author(name=bot.user.name, icon_url=bot.user.avatar.url if bot.user.avatar else None)
+
+
+    # Add fields for each warning
+    for i, warning in enumerate(user_warnings, 1):
+        reason = warning.get("reason", "No reason provided.")
+        moderator_id = warning.get("moderator_id")
+        timestamp_str = warning.get("timestamp")
+
+        moderator_name = "Unknown Moderator"
+        if moderator_id:
+            try:
+                # Try to fetch moderator by ID
+                mod_member = ctx.guild.get_member(int(moderator_id))
+                if mod_member:
+                    moderator_name = mod_member.display_name
+                else: # If not in cache, try fetching by ID from API
+                    mod_user = await bot.fetch_user(int(moderator_id))
+                    if mod_user:
+                        moderator_name = mod_user.name
+            except Exception:
+                pass # If fetching fails, stick to "Unknown Moderator"
+
+        # Format timestamp nicely
+        formatted_timestamp = "N/A"
+        if timestamp_str:
+            try:
+                dt_object = datetime.datetime.fromisoformat(timestamp_str)
+                # Convert to local time for display, if desired, or keep UTC
+                formatted_timestamp = dt_object.strftime("%Y-%m-%d %H:%M UTC")
+            except ValueError:
+                pass
+
+        embed.add_field(
+            name=f"Warning #{i}",
+            value=(
+                f"**Reason:** {reason}\n"
+                f"**Moderator:** {moderator_name}\n"
+                f"**Date:** {formatted_timestamp}"
+            ),
+            inline=False # Each warning takes a full line
+        )
+
+    embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    await ctx.send(embed=embed)
 
 # --- Kick Command ---
 @bot.command(name='kick')
@@ -376,6 +541,45 @@ async def ban_user(ctx, member: discord.Member, *, reason: str = "No reason prov
     except Exception as e:
         await ctx.send(f"An unexpected error occurred: {e}")
         print(f"Unexpected error in ban: {e}")
+
+# --- Unban Command ---
+@bot.command(name='unban')
+@commands.has_permissions(ban_members=True) # User needs Ban Members permission
+async def unban_user(ctx, *, user_input: str):
+    """Unbans a user from the server. Usage: eli unban <user_id_or_name#discriminator> [reason]
+    Requires 'Ban Members' permission."""
+
+    # Check if the bot has sufficient permissions
+    if not ctx.guild.me.guild_permissions.ban_members:
+        await ctx.send("I don't have permission to unban members. Please grant me 'Ban Members'.")
+        return
+
+    # Find the banned user using the helper function
+    user_to_unban = await get_banned_user(ctx.guild, user_input)
+
+    if not user_to_unban:
+        await ctx.send(f"Could not find a banned user matching `{user_input}`. Please use their User ID or exact Username#Discriminator.")
+        return
+
+    reason = f"Unbanned by {ctx.author.name}#{ctx.author.discriminator} ({ctx.author.id})."
+
+    try:
+        await ctx.guild.unban(user_to_unban, reason=reason)
+        await ctx.send(f'Successfully unbanned {user_to_unban.mention} ({user_to_unban.id}).')
+        print(f"Unbanned {user_to_unban.name} ({user_to_unban.id}) from {ctx.guild.name}.")
+        # Try to DM the unbanned user (often fails as they might not be in a shared server or have DMs closed)
+        try:
+            await user_to_unban.send(f"You have been unbanned from **{ctx.guild.name}**.")
+        except discord.Forbidden:
+            print(f"Could not DM {user_to_unban.name} after unban (DMs forbidden).")
+    except discord.Forbidden:
+        await ctx.send("I don't have permission to unban members. Please grant me 'Ban Members'.")
+    except discord.HTTPException as e:
+        await ctx.send(f"An error occurred while trying to unban: {e}")
+        print(f"Error unbanning {user_to_unban.name}: {e}")
+    except Exception as e:
+        await ctx.send(f"An unexpected error occurred: {e}")
+        print(f"Unexpected error in unban: {e}")
 
 
 # --- Mute Command (using Discord's native Timeout) ---
