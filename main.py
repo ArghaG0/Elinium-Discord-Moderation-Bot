@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import datetime
 import asyncio
 import json
+from keep_alive import start_keep_alive_server
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -1074,5 +1075,7 @@ async def on_ready():
 
     # await bot.change_presence(activity=discord.Game(name="with Python"))
 
-# Run the bot
-bot.run(TOKEN)
+if __name__ == '__main__':
+    start_keep_alive_server(
+    )  # This will start the Flask server in a new thread
+    bot.run(TOKEN)  # This will start your Discord bot
