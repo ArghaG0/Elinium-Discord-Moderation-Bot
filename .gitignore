@@ -9,6 +9,7 @@ venv/
 env/
 warnings.json
 modlog_settings.json
+blacklists.json
 
 # Operating System specific
 .DS_Store # macOS
