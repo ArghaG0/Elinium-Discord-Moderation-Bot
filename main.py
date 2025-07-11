@@ -5,14 +5,13 @@ from dotenv import load_dotenv
 import datetime
 import asyncio
 import json
-from keep_alive import start_keep_alive_server
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # --- Automod Blacklists ---
 BAD_WORDS = [
-    "motherfucker",
+    "motherfucker","cock","pussy",
     "bitch",
     "dick",
     "slut",
@@ -225,6 +224,8 @@ intents.members = True # Enable if your bot needs member info
 bot = commands.Bot(command_prefix='eli ', intents=intents)
 bot.remove_command('help')
 
+BOT_START_TIME = datetime.datetime.now(datetime.timezone.utc)
+
 @bot.event
 async def on_ready():
     """Called when the bot is ready and connected to Discord."""
@@ -293,6 +294,142 @@ async def on_message(message):
 async def ping(ctx):
     """Responds with 'Pong!' and the bot's latency."""
     await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
+
+# --- botinfo Command ---
+@bot.command(name='botinfo') 
+async def bot_info(ctx):
+    """Displays information and statistics about the bot."""
+
+    # Calculate uptime
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    uptime_delta = current_time - BOT_START_TIME
+
+    # Format uptime nicely
+    days, remainder = divmod(int(uptime_delta.total_seconds()), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    uptime_string_parts = []
+    if days:
+        uptime_string_parts.append(f"{days}d")
+    if hours:
+        uptime_string_parts.append(f"{hours}h")
+    if minutes:
+        uptime_string_parts.append(f"{minutes}m")
+    if seconds or not uptime_string_parts: # Show seconds if less than a minute, or if 0
+        uptime_string_parts.append(f"{seconds}s")
+    
+    uptime_str = " ".join(uptime_string_parts)
+
+
+    embed = discord.Embed(
+        title=f"{EMOJI_CROWN} My Information {EMOJI_CROWN}",
+        description=f"{EMOJI_HEART} All about your friendly moderation bot! {EMOJI_HEART}",
+        color=0xFFB6C1 # Pinkish color
+    )
+    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
+    embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+
+    # General Info
+    embed.add_field(name=f"Name {EMOJI_RIBBON}", value=bot.user.name, inline=True)
+    embed.add_field(name=f"ID {EMOJI_STAR}", value=bot.user.id, inline=True)
+    embed.add_field(name=f"Prefix {EMOJI_FLOWER}", value=f"`{bot.command_prefix}`", inline=True)
+
+    # Stats
+    embed.add_field(name=f"Servers", value=len(bot.guilds), inline=True)
+    embed.add_field(name=f"Users Served", value=len(bot.users), inline=True)
+    embed.add_field(name=f"Latency", value=f"{round(bot.latency * 1000)}ms", inline=True)
+    embed.add_field(name=f"Uptime", value=uptime_str, inline=False)
+    
+    # Other Info
+    embed.add_field(name=f"Library", value=f"discord.py v{discord.__version__}", inline=True)
+    embed.add_field(name=f"Owner {EMOJI_CROWN}", value=f"<@{os.getenv('BOT_OWNER_ID') or 'Not Set'}>", inline=True)
+    embed.add_field(name=f"Created On", value=bot.user.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
+
+
+    await ctx.send(embed=embed)
+
+# --- userinfo Command ---
+@bot.command(name='userinfo', aliases=['whois']) # 'uinfo' alias removed
+async def user_info(ctx, member: discord.Member = None):
+    """Displays detailed information about a user.
+    Usage: eli userinfo [member_mention_or_id]"""
+
+    if member is None:
+        member = ctx.author # If no member is specified, get info about the command invoker
+
+    embed = discord.Embed(
+        title=f"{EMOJI_FLOWER} User Info: {member.display_name} {EMOJI_FLOWER}",
+        color=0xFFB6C1, # Consistent pink color
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+    embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+
+    # General User Information (applies to any Discord User, even if not in current guild)
+    embed.add_field(name=f"{EMOJI_RIBBON} User", value=member.mention, inline=False)
+    
+    # Handle discriminator for older vs. new usernames
+    if hasattr(member, 'discriminator') and member.discriminator != '0':
+        embed.add_field(name=f"{EMOJI_SPARKLE} Username", value=f"{member.name}#{member.discriminator}", inline=True)
+    else:
+        embed.add_field(name=f"{EMOJI_SPARKLE} Username", value=member.name, inline=True)
+        
+    embed.add_field(name=f"{EMOJI_STAR} User ID", value=member.id, inline=True)
+    embed.add_field(name=f"{EMOJI_RIBBON} Account Created", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
+
+    # Guild-Specific Information (only applies if the member is in the current guild)
+    if isinstance(member, discord.Member): # Check if it's a Member object (means they are in the guild)
+        embed.add_field(name=f"{EMOJI_STAR} Joined Server", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=False)
+        
+        # Roles
+        # Filter out @everyone role and sort roles by position
+        roles = [role.mention for role in member.roles if role.name != "@everyone"]
+        roles.reverse() # Display highest role first
+        embed.add_field(name=f"{EMOJI_RIBBON} Roles ({len(roles)})", value="\n".join(roles) if roles else "No roles (except @everyone)", inline=False)
+        embed.add_field(name=f"{EMOJI_CROWN} Top Role", value=member.top_role.mention, inline=True)
+
+        # Status
+        status_map = {
+            discord.Status.online: "Online",
+            discord.Status.idle: "Idle",
+            discord.Status.dnd: "Do Not Disturb",
+            discord.Status.offline: "Offline"
+        }
+        embed.add_field(name=f"{EMOJI_HEART} Status", value=status_map.get(member.status, "Unknown"), inline=True)
+
+        # Activities
+        activities = []
+        for activity in member.activities:
+            if isinstance(activity, discord.Game):
+                activities.append(f"Playing **{activity.name}**")
+            elif isinstance(activity, discord.Streaming):
+                activities.append(f"Streaming **{activity.name}** on {activity.platform}")
+            elif isinstance(activity, discord.Activity): # General custom status or other types
+                activities.append(f"{activity.name}")
+            elif isinstance(activity, discord.CustomActivity):
+                 activities.append(f"Custom Status: {activity.name}")
+
+
+        if activities:
+            embed.add_field(name=f"{EMOJI_BUTTERFLY} Activities", value="\n".join(activities), inline=False)
+        else:
+            embed.add_field(name=f"{EMOJI_BUTTERFLY} Activities", value="No current activity.", inline=False)
+            
+    else: # If the member is not in the guild (e.g., from an ID that's not a current member)
+        embed.add_field(name="Note", value="This user is not currently in this server.", inline=False)
+
+    await ctx.send(embed=embed)
+
+@user_info.error
+async def user_info_error(ctx, error):
+    if isinstance(error, commands.MemberNotFound):
+        await ctx.send(f"{EMOJI_SPARKLE} Could not find that member. Please make sure you spelled the name correctly or provided a valid ID/mention. {EMOJI_SPARKLE}")
+    elif isinstance(error, commands.BadArgument):
+        await ctx.send(f"{EMOJI_SPARKLE} Invalid argument. Please mention a member or provide their ID. Usage: `eli userinfo [member_mention_or_id]` {EMOJI_SPARKLE}")
+    else:
+        await ctx.send(f"{EMOJI_HEART} An error occurred: {error} {EMOJI_HEART}")
+        print(f"Error in user_info: {error}")
 
 # --- Detailed Server Info Command with Embed ---
 @bot.command(name='serverinfo', aliases=['guildinfo', 'server'])
@@ -1034,7 +1171,7 @@ async def list_commands(ctx):
         formatted_cmd_name = f"**`{bot.command_prefix}{command.name}`**"
 
         # Check command name and add to appropriate list
-        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands', 'serverinfo', 'guildinfo', 'server']:
+        if command.name in ['eli', 'ping', 'info', 'say', 'cmds', 'help', 'commands', 'serverinfo', 'guildinfo', 'server' , 'botinfo' , 'userinfo' , 'whois']:
             general_cmds.append(formatted_cmd_name)
         elif command.name in ['purge', 'warn', 'mute', 'unmute', 'kick', 'ban', 'unban', 'warnings', 'setmodlogchannel']: # ADDED setmodlogchannel here
             moderation_cmds.append(formatted_cmd_name)
@@ -1075,7 +1212,5 @@ async def on_ready():
 
     # await bot.change_presence(activity=discord.Game(name="with Python"))
 
-if __name__ == '__main__':
-    start_keep_alive_server(
-    )  # This will start the Flask server in a new thread
-    bot.run(TOKEN)  # This will start your Discord bot
+
+bot.run(TOKEN)  # This will start your Discord bot
