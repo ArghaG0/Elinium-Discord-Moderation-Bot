@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio # Needed for unmute/mute timing
 import datetime # Needed for timestamps
 from typing import Optional 
+from discord import app_commands
 
 # Import your helper functions from utils.py
 from utils import load_warnings, save_warnings, load_modlog_settings, save_modlog_settings, send_modlog_embed, parse_duration , load_blacklists , save_blacklists
@@ -17,6 +18,7 @@ class Moderation(commands.Cog):
         # --- NEW: Load dynamic blacklists ---
         self.all_blacklists_data = load_blacklists() 
         print(f"Loaded all blacklists data: {self.all_blacklists_data}")
+
 
     # --- Hierarchy Check Helper Method ---
     # This helper is specific to moderation commands, so it's a method of this cog

@@ -43,6 +43,7 @@ def save_blacklists(blacklists_data):
     with open(BLACKLISTS_FILE, 'w') as f:
         json.dump(blacklists_data, f, indent=4)
 
+
 # --- Helper Functions for Modlog Channel ---
 MODLOG_SETTINGS_FILE = 'modlog_settings.json'
 
