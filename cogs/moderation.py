@@ -779,7 +779,7 @@ class Moderation(commands.Cog):
         #     await message.channel.send(f"Your response!")
         #     return # Crucial to stop after one response
 
-     # --- Blacklist Management Group Commands (Includes helper and per-guild logic) ---
+     # --- Blacklist Management Group Commands ---
     @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -790,20 +790,19 @@ class Moderation(commands.Cog):
         if ctx.invoked_subcommand is None:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
 
-    # --- CORRECTED: Helper function to get/initialize guild blacklists ---
     def _get_guild_blacklists(self, guild_id: str):
-        """Retrieves or initializes the blacklist data for a specific guild."""
         if guild_id not in self.all_blacklists_data:
             self.all_blacklists_data[guild_id] = {"blacklisted_words": [], "blacklisted_links": []}
         return self.all_blacklists_data[guild_id]
 
 
     @blacklist_group.command(name='addword')
-    async def blacklist_addword(self, ctx, *words_to_add: str):
+    async def blacklist_addword(self, ctx, *words_input: str): # Renamed to words_input for clarity
         """Adds one or more words to the blacklisted words list for this server.
-        Usage: `eli blacklist addword <word1> [word2] [word3]...`
+        Handles comma-separated words.
+        Usage: `eli blacklist addword <word1> [word2,word3] [word4]...`
         """
-        if not words_to_add:
+        if not words_input:
             return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to add. {self.bot.EMOJIS['SPARKLE']}")
 
         guild_id = str(ctx.guild.id)
@@ -811,20 +810,35 @@ class Moderation(commands.Cog):
         
         added_count = 0
         skipped_words = []
+        
+        # --- NEW PARSING LOGIC ---
+        # Join all parts of the input, then split by commas.
+        # Each part is then further split by whitespace to handle 'word1, word2'
+        processed_words = []
+        full_input_string = " ".join(words_input)
+        for part_by_comma in full_input_string.split(','):
+            # Split each comma-separated part by whitespace
+            for final_word_candidate in part_by_comma.split(): 
+                cleaned_word = final_word_candidate.lower().strip()
+                if cleaned_word: # Ensure it's not empty after stripping
+                    processed_words.append(cleaned_word)
+        # --- END NEW PARSING LOGIC ---
 
-        for word_raw in words_to_add:
-            word = word_raw.lower().strip()
-            if not word: 
-                continue
-            
+        if not processed_words: # If no valid words were found after all parsing
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid words were provided after parsing. Please ensure words are separated by spaces or commas. {self.bot.EMOJIS['SPARKLE']}")
+
+
+        for word in processed_words:
             if word in guild_blacklists["blacklisted_words"]:
-                skipped_words.append(word_raw) 
+                # Use the originally provided word (before cleaning) for better feedback,
+                # or the cleaned word if you prefer consistency. Using cleaned word for skipped.
+                skipped_words.append(word) 
             else:
                 guild_blacklists["blacklisted_words"].append(word)
                 added_count += 1
         
         if added_count > 0:
-            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            save_blacklists(self.all_blacklists_data) 
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} word(s) to this server's blacklisted words list."
             if skipped_words:
                 feedback += f"\nSkipped {len(skipped_words)} word(s) already present: `{'`, `'.join(skipped_words)}`."
@@ -843,11 +857,12 @@ class Moderation(commands.Cog):
 
 
     @blacklist_group.command(name='removeword', aliases=['delword'])
-    async def blacklist_removeword(self, ctx, *words_to_remove: str):
+    async def blacklist_removeword(self, ctx, *words_input: str): # Renamed to words_input
         """Removes one or more words from the blacklisted words list for this server.
-        Usage: `eli blacklist removeword <word1> [word2] [word3]...`
+        Handles comma-separated words.
+        Usage: `eli blacklist removeword <word1> [word2,word3] [word4]...`
         """
-        if not words_to_remove:
+        if not words_input:
             return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to remove. {self.bot.EMOJIS['SPARKLE']}")
 
         guild_id = str(ctx.guild.id)
@@ -856,19 +871,28 @@ class Moderation(commands.Cog):
         removed_count = 0
         skipped_words = []
 
-        for word_raw in words_to_remove:
-            word = word_raw.lower().strip()
-            if not word:
-                continue
+        # --- NEW PARSING LOGIC ---
+        processed_words = []
+        full_input_string = " ".join(words_input)
+        for part_by_comma in full_input_string.split(','):
+            for final_word_candidate in part_by_comma.split():
+                cleaned_word = final_word_candidate.lower().strip()
+                if cleaned_word:
+                    processed_words.append(cleaned_word)
+        # --- END NEW PARSING LOGIC ---
 
+        if not processed_words:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid words were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
+
+        for word in processed_words:
             if word in guild_blacklists["blacklisted_words"]:
                 guild_blacklists["blacklisted_words"].remove(word)
                 removed_count += 1
             else:
-                skipped_words.append(word_raw)
+                skipped_words.append(word)
         
         if removed_count > 0:
-            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} word(s) from this server's blacklisted words list."
             if skipped_words:
                 feedback += f"\nSkipped {len(skipped_words)} word(s) not found: `{'`, `'.join(skipped_words)}`."
@@ -906,11 +930,12 @@ class Moderation(commands.Cog):
 
 
     @blacklist_group.command(name='addlink')
-    async def blacklist_addlink(self, ctx, *links_to_add: str):
+    async def blacklist_addlink(self, ctx, *links_input: str): # Renamed to links_input
         """Adds one or more links to the blacklisted links list for this server.
-        Usage: `eli blacklist addlink <link1> [link2] [link3]...`
+        Handles comma-separated links.
+        Usage: `eli blacklist addlink <link1> [link2,link3] [link4]...`
         """
-        if not links_to_add:
+        if not links_input:
             return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to add. {self.bot.EMOJIS['SPARKLE']}")
 
         guild_id = str(ctx.guild.id)
@@ -919,19 +944,28 @@ class Moderation(commands.Cog):
         added_count = 0
         skipped_links = []
 
-        for link_raw in links_to_add:
-            link = link_raw.lower().strip()
-            if not link:
-                continue
+        # --- NEW PARSING LOGIC ---
+        processed_links = []
+        full_input_string = " ".join(links_input)
+        for part_by_comma in full_input_string.split(','):
+            for final_link_candidate in part_by_comma.split():
+                cleaned_link = final_link_candidate.lower().strip()
+                if cleaned_link:
+                    processed_links.append(cleaned_link)
+        # --- END NEW PARSING LOGIC ---
 
+        if not processed_links:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid links were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
+
+        for link in processed_links:
             if link in guild_blacklists["blacklisted_links"]:
-                skipped_links.append(link_raw)
+                skipped_links.append(link)
             else:
                 guild_blacklists["blacklisted_links"].append(link)
                 added_count += 1
         
         if added_count > 0:
-            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} link(s) to this server's blacklisted links list."
             if skipped_links:
                 feedback += f"\nSkipped {len(skipped_links)} link(s) already present: `{'`, `'.join(skipped_links)}`."
@@ -949,11 +983,12 @@ class Moderation(commands.Cog):
 
 
     @blacklist_group.command(name='removelink', aliases=['dellink'])
-    async def blacklist_removelink(self, ctx, *links_to_remove: str):
+    async def blacklist_removelink(self, ctx, *links_input: str): # Renamed to links_input
         """Removes one or more links from the blacklisted links list for this server.
-        Usage: `eli blacklist removelink <link1> [link2] [link3]...`
+        Handles comma-separated links.
+        Usage: `eli blacklist removelink <link1> [link2,link3] [link4]...`
         """
-        if not links_to_remove:
+        if not links_input:
             return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to remove. {self.bot.EMOJIS['SPARKLE']}")
 
         guild_id = str(ctx.guild.id)
@@ -962,19 +997,29 @@ class Moderation(commands.Cog):
         removed_count = 0
         skipped_links = []
 
-        for link_raw in links_to_remove:
-            link = link_raw.lower().strip()
-            if not link:
-                continue
+        # --- NEW PARSING LOGIC ---
+        processed_links = []
+        full_input_string = " ".join(links_input)
+        for part_by_comma in full_input_string.split(','):
+            for final_link_candidate in part_by_comma.split():
+                cleaned_link = final_link_candidate.lower().strip()
+                if cleaned_link:
+                    processed_links.append(cleaned_link)
+        # --- END NEW PARSING LOGIC ---
 
+        if not processed_links:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid links were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
+
+
+        for link in processed_links:
             if link in guild_blacklists["blacklisted_links"]:
                 guild_blacklists["blacklisted_links"].remove(link)
                 removed_count += 1
             else:
-                skipped_links.append(link_raw)
+                skipped_links.append(link)
         
         if removed_count > 0:
-            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} link(s) from this server's blacklisted links list."
             if skipped_links:
                 feedback += f"\nSkipped {len(skipped_links)} link(s) not found: `{'`, `'.join(skipped_links)}`."
