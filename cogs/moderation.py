@@ -671,10 +671,6 @@ class Moderation(commands.Cog):
             if "eli" in words or any(word.startswith("eli") for word in words) or any(word.endswith("eli") for word in words):
                 await message.channel.send(f"Hello {message.author.mention}, how may I help you? {self.bot.EMOJIS['HEART']}")
                 return # Stop here to prevent multiple responses for one message
-        
-        
-    
-        
 
         # You can add more interactive responses here following the same pattern:
         # if "your_phrase" in msg_content:
