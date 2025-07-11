@@ -22,6 +22,27 @@ def save_warnings(warnings_data):
     with open(WARNINGS_FILE, 'w') as f:
         json.dump(warnings_data, f, indent=4)
 
+# --- NEW: Helper Functions for Blacklists ---
+BLACKLISTS_FILE = 'blacklists.json'
+
+def load_blacklists():
+    """Loads blacklisted words and links from blacklists.json."""
+    try:
+        with open(BLACKLISTS_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Return default structure if file doesn't exist
+        return {"blacklisted_words": [], "blacklisted_links": []}
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from {BLACKLISTS_FILE}. Returning default empty blacklists.")
+        # Return default structure on decode error to prevent crashes
+        return {"blacklisted_words": [], "blacklisted_links": []}
+
+def save_blacklists(blacklists_data):
+    """Saves blacklisted words and links to blacklists.json."""
+    with open(BLACKLISTS_FILE, 'w') as f:
+        json.dump(blacklists_data, f, indent=4)
+
 # --- Helper Functions for Modlog Channel ---
 MODLOG_SETTINGS_FILE = 'modlog_settings.json'
 

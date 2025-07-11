@@ -5,7 +5,7 @@ import datetime # Needed for timestamps
 from typing import Optional 
 
 # Import your helper functions from utils.py
-from utils import load_warnings, save_warnings, load_modlog_settings, save_modlog_settings, send_modlog_embed, parse_duration
+from utils import load_warnings, save_warnings, load_modlog_settings, save_modlog_settings, send_modlog_embed, parse_duration , load_blacklists , save_blacklists
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
@@ -14,10 +14,12 @@ class Moderation(commands.Cog):
         self.muted_users = {} 
 
         # --- Automod Configuration (PLACEHOLDERS) ---
-        # IMPORTANT: For a real bot, you'd want to load these from a config file or database
-        # rather than hardcoding them here. For now, replace these with your actual lists.
-        self.BLACKLISTED_WORDS = ["asshole", "bitch", "fuck", "motherfucker" ,"pussy" , "slut" , "nigga" , "nigger" , "mofo" , "bokachoda" , "chut" , "behenchod" ,"cock" ,"dickhead" ,"dick" , "bkl" , "madarchod"] # Example words
-        self.BLACKLISTED_LINKS = ["instagram.com", "discord.gg"] # Example links
+        # --- NEW: Load dynamic blacklists ---
+        blacklists = load_blacklists()
+        self.blacklisted_words = blacklists.get("blacklisted_words", [])
+        self.blacklisted_links = blacklists.get("blacklisted_links", [])
+        print(f"Loaded blacklisted words: {self.blacklisted_words}")
+        print(f"Loaded blacklisted links: {self.blacklisted_links}")
 
     # --- Hierarchy Check Helper Method ---
     # This helper is specific to moderation commands, so it's a method of this cog
@@ -41,6 +43,143 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['CROWN']} I cannot {action_name} that member because their highest role is equal to or higher than my highest role. Please move my role higher. {self.bot.EMOJIS['CROWN']}")
             return False
         return True
+    
+    # --- NEW: Blacklist Management Group Commands ---
+    @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True) # Require manage_guild permission to use any blacklist command
+    async def blacklist_group(self, ctx):
+        """Manages blacklisted words and links for AutoMod.
+        Use `eli help blacklist` for subcommands.
+        """
+        if ctx.invoked_subcommand is None:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
+
+
+    @blacklist_group.command(name='addword')
+    async def blacklist_addword(self, ctx, *, word: str):
+        """Adds a word to the blacklisted words list.
+        Usage: `eli blacklist addword <word>`
+        """
+        word = word.lower().strip() # Store in lowercase for consistent matching
+        if word in self.blacklisted_words:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{word}' is already in the blacklisted words list. {self.bot.EMOJIS['SPARKLE']}")
+
+        self.blacklisted_words.append(word)
+        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
+        save_blacklists(blacklists_data)
+
+        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully added '{word}' to the blacklisted words list. {self.bot.EMOJIS['HEART']}")
+        await send_modlog_embed(
+            self.bot,
+            ctx.guild,
+            "Blacklist Update",
+            ctx.author, # Moderator who performed the action
+            self.bot.user, # Bot as the target, or ctx.author if you want to explicitly state the user's ID
+            f"Added blacklisted word: **`{word}`**"
+        )
+
+    @blacklist_group.command(name='removeword', aliases=['delword'])
+    async def blacklist_removeword(self, ctx, *, word: str):
+        """Removes a word from the blacklisted words list.
+        Usage: `eli blacklist removeword <word>`
+        """
+        word = word.lower().strip()
+        if word not in self.blacklisted_words:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{word}' is not found in the blacklisted words list. {self.bot.EMOJIS['SPARKLE']}")
+
+        self.blacklisted_words.remove(word)
+        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
+        save_blacklists(blacklists_data)
+
+        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully removed '{word}' from the blacklisted words list. {self.bot.EMOJIS['HEART']}")
+        await send_modlog_embed(
+            self.bot,
+            ctx.guild,
+            "Blacklist Update",
+            ctx.author,
+            self.bot.user,
+            f"Removed blacklisted word: **`{word}`**"
+        )
+
+    @blacklist_group.command(name='listwords')
+    async def blacklist_listwords(self, ctx):
+        """Lists all blacklisted words.
+        Usage: `eli blacklist listwords`
+        """
+        if not self.blacklisted_words:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted words currently. {self.bot.EMOJIS['SPARKLE']}")
+
+        words_list = "\n".join(f"- `{word}`" for word in self.blacklisted_words)
+        embed = discord.Embed(
+            title="<:sparkle:1256588611625160935> Blacklisted Words <a:sparkle:1256588611625160935>", # Use your custom sparkle emoji here
+            description=words_list,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+
+
+    @blacklist_group.command(name='addlink')
+    async def blacklist_addlink(self, ctx, *, link: str):
+        """Adds a link to the blacklisted links list.
+        Usage: `eli blacklist addlink <link>`
+        """
+        link = link.lower().strip()
+        if link in self.blacklisted_links:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{link}' is already in the blacklisted links list. {self.bot.EMOJIS['SPARKLE']}")
+
+        self.blacklisted_links.append(link)
+        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
+        save_blacklists(blacklists_data)
+
+        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully added '{link}' to the blacklisted links list. {self.bot.EMOJIS['HEART']}")
+        await send_modlog_embed(
+            self.bot,
+            ctx.guild,
+            "Blacklist Update",
+            ctx.author,
+            self.bot.user,
+            f"Added blacklisted link: **`{link}`**"
+        )
+
+    @blacklist_group.command(name='removelink', aliases=['dellink'])
+    async def blacklist_removelink(self, ctx, *, link: str):
+        """Removes a link from the blacklisted links list.
+        Usage: `eli blacklist removelink <link>`
+        """
+        link = link.lower().strip()
+        if link not in self.blacklisted_links:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{link}' is not found in the blacklisted links list. {self.bot.EMOJIS['SPARKLE']}")
+
+        self.blacklisted_links.remove(link)
+        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
+        save_blacklists(blacklists_data)
+
+        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully removed '{link}' from the blacklisted links list. {self.bot.EMOJIS['HEART']}")
+        await send_modlog_embed(
+            self.bot,
+            ctx.guild,
+            "Blacklist Update",
+            ctx.author,
+            self.bot.user,
+            f"Removed blacklisted link: **`{link}`**"
+        )
+
+    @blacklist_group.command(name='listlinks')
+    async def blacklist_listlinks(self, ctx):
+        """Lists all blacklisted links.
+        Usage: `eli blacklist listlinks`
+        """
+        if not self.blacklisted_links:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted links currently. {self.bot.EMOJIS['SPARKLE']}")
+
+        links_list = "\n".join(f"- `{link}`" for link in self.blacklisted_links)
+        embed = discord.Embed(
+            title="<:sparkle:1256588611625160935> Blacklisted Links <a:sparkle:1256588611625160935>", # Use your custom sparkle emoji here
+            description=links_list,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
 
     # --- Warn Command ---
     @commands.command(name='warn')
@@ -250,17 +389,7 @@ class Moderation(commands.Cog):
         if guild_id in warnings_data and not warnings_data[guild_id]:
             del warnings_data[guild_id]
 
-        # --- You can remove these print statements after confirming the fix ---
-        print("--- Warnings Data BEFORE Final Save (should be updated) ---")
-        print(warnings_data)
-        print("---------------------------------------------------------")
-
         save_warnings(warnings_data) # Save the updated warnings data
-
-        print("--- Warnings Data AFTER Saving (Called save_warnings) ---")
-        print("-----------------------------------------------------")
-        # --- End of print statements ---
-
 
         # Send confirmation message to the channel
         await ctx.send(action_feedback_msg)
@@ -680,9 +809,10 @@ class Moderation(commands.Cog):
             print(f"Error in set_modlog_channel: {error}")
 
     # --- Automod on_message event listener ---
-    @commands.Cog.listener() # This decorator tells discord.py it's an event listener within a cog
+    @commands.Cog.listener()
     async def on_message(self, message):
         """Automod logic to delete blacklisted words and links."""
+
         # Ignore messages from bots themselves
         if message.author.bot:
             return
@@ -691,22 +821,24 @@ class Moderation(commands.Cog):
         if message.guild is None:
             return
 
+        # --- IMPORTANT FIX: Use self.blacklisted_words (lowercase 'b') ---
         # Check for blacklisted words
-        for word in self.BLACKLISTED_WORDS:
+        for word in self.blacklisted_words: # <--- CHANGED FROM self.BLACKLISTED_WORDS
+            # Basic check for now, will refine with regex later
             if word.lower() in message.content.lower():
                 try:
                     await message.delete()
                     await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that word is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
                     print(f"Deleted message from {message.author.name} for blacklisted word in {message.channel.name}.")
                     await send_modlog_embed(
-                        self.bot, # Pass the bot instance
+                        self.bot,
                         message.guild,
-                        "Automod",
+                        "Automod: Blacklisted Word",
                         message.author,
-                        self.bot.user, # Bot is the moderator for automod
+                        self.bot.user,
                         f"Used blacklisted word: '{word}'"
                     )
-                    return # Stop processing after finding one blacklisted word
+                    return
                 except discord.Forbidden:
                     print(f"Bot lacks permissions to delete messages in {message.channel.name}.")
                     return
@@ -714,22 +846,23 @@ class Moderation(commands.Cog):
                     print(f"Error deleting message for blacklisted word: {e}")
                     return
 
+        # --- IMPORTANT FIX: Use self.blacklisted_links (lowercase 'b') ---
         # Check for blacklisted links
-        for link in self.BLACKLISTED_LINKS:
+        for link in self.blacklisted_links: # <--- CHANGED FROM self.BLACKLISTED_LINKS
             if link.lower() in message.content.lower():
                 try:
                     await message.delete()
                     await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that link is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
                     print(f"Deleted message from {message.author.name} for blacklisted link in {message.channel.name}.")
                     await send_modlog_embed(
-                        self.bot, # Pass the bot instance
+                        self.bot,
                         message.guild,
-                        "Automod",
+                        "Automod: Blacklisted Link",
                         message.author,
                         self.bot.user,
                         f"Posted blacklisted link: '{link}'"
                     )
-                    return # Stop processing after finding one blacklisted link
+                    return
                 except discord.Forbidden:
                     print(f"Bot lacks permissions to delete messages for links in {message.channel.name}.")
                     return
@@ -737,12 +870,11 @@ class Moderation(commands.Cog):
                     print(f"Error deleting message for blacklisted link: {e}")
                     return
         
-         # --- Interactive Responses (run these after automod) ---
+        # --- Interactive Responses (These remain unchanged) ---
         # Do not respond if the message is a command (starts with the bot's prefix)
         if message.content.lower().startswith(self.bot.command_prefix.lower()):
             return
 
-        # Convert message content to lowercase for easier comparison
         msg_content = message.content.lower()
 
         if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
@@ -753,12 +885,11 @@ class Moderation(commands.Cog):
                 await message.channel.send(f"Aww, I love you too, {message.author.mention}! {self.bot.EMOJIS['MANYBUTTERFLIES']}")
                 return
 
-        # Respond if someone says "hello"
         if "hello" in msg_content:
-             words = msg_content.split()
-             if "hello" in words or any(word.startswith("hello") for word in words) or any(word.endswith("hello") for word in words):
-                await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
-                return # Stop here
+              words = msg_content.split()
+              if "hello" in words or any(word.startswith("hello") for word in words) or any(word.endswith("hello") for word in words):
+                  await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
+                  return
         
         if "good morning" in msg_content:
                 await message.channel.send(f"Good morning, {message.author.mention}! Hope you have a wonderful day. {self.bot.EMOJIS['STAR']}")
@@ -772,15 +903,11 @@ class Moderation(commands.Cog):
                 await message.channel.send(f"See you later, {message.author.mention}! {self.bot.EMOJIS['BUTTERFLY']}")
                 return
         
-        # Respond if someone says "eli"
         if "eli" in msg_content:
-            # Add a check to prevent responding if "eli" is just part of a longer word
-            # This simple check ensures "eli" is either a standalone word or at the start/end
-            # For more robust checking, you'd use regex (but this is simpler for now)
             words = msg_content.split()
             if "eli" in words or any(word.startswith("eli") for word in words) or any(word.endswith("eli") for word in words):
                 await message.channel.send(f"Hello {message.author.mention}, how may I help you? {self.bot.EMOJIS['HEART']}")
-                return # Stop here to prevent multiple responses for one message
+                return
 
         # You can add more interactive responses here following the same pattern:
         # if "your_phrase" in msg_content:
