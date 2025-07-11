@@ -3,32 +3,11 @@ from discord.ext import commands
 import os
 import datetime
 from dotenv import load_dotenv
-from aiohttp import web
-
-# --- NEW: Web Server Functions for Uptime Monitoring ---
-async def handle_health_check(request):
-    """Responds to health check pings to keep the service awake."""
-    return web.Response(text="Bot is alive!")
-
-async def web_server_start():
-    """Starts a small web server to listen for uptime pings."""
-    app = web.Application()
-    app.router.add_get("/", handle_health_check) # Define a simple endpoint for pings
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    # Render provides a PORT environment variable for Web Services.
-    # We'll use 8080 as a fallback for local testing if PORT isn't set.
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"Web server started on port {port}")
 
 # Load environment variables
 load_dotenv()
-TOKEN = os.environ.get('DISCORD_TOKEN')
-BOT_OWNER_ID = os.environ.get('BOT_OWNER_ID') # Ensure this is set in your .env file
+TOKEN = os.getenv('DISCORD_TOKEN')
+BOT_OWNER_ID = os.getenv('BOT_OWNER_ID') # Ensure this is set in your .env file
 
 # Define your global emojis here. These will be accessible by all cogs via 'bot' object.
 EMOJI_CROWN = "<:26985whitecrown:1392780685592231936>"
@@ -86,8 +65,6 @@ async def on_ready():
 
     # Set bot's activity/presence (optional)
     # await bot.change_presence(activity=discord.Game(name="with Python"))
-    bot.loop.create_task(web_server_start()) # <-- ADD THIS LINE
-    print("Bot is fully ready and web server is running!")
 
 
 async def load_extensions():

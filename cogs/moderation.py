@@ -25,19 +25,19 @@ class Moderation(commands.Cog):
 
         # Load all warnings data
         self.all_warnings_data = load_warnings()
-        print(f"Loaded all warnings data: {self.all_warnings_data}")
+        print("Loaded all warnings data")
 
         # Load modlog settings (if used)
         self.all_modlog_settings = load_modlog_settings()
-        print(f"Loaded all modlog settings: {self.all_modlog_settings}")
+        print("Loaded all modlog settings")
 
         # Load dynamic blacklists
         self.all_blacklists_data = load_blacklists()
-        print(f"Loaded all blacklists data: {self.all_blacklists_data}")
+        print("Loaded all blacklists data")
 
         # Load confession channel data (NEW)
         self.confession_channels_data = load_confession_channels()
-        print(f"Loaded confession channels data: {self.confession_channels_data}")
+        print("Loaded confession channels data")
 
     # --- Helper Method: Hierarchy Check ---
     async def _check_hierarchy(self, ctx, member, action_name):
