@@ -56,7 +56,7 @@ async def send_modlog_embed(bot, guild, action_type, member, moderator, reason, 
         print(f"Modlog channel (ID: {modlog_channel_id}) not found in guild {guild.name}.")
         return
 
-    title = f"❗ {action_type} Log"
+    title = f"<:pinkexclamationmark:1393151965114011760> {action_type} Log"
     description = (
         f"**User:** {member.mention} ({member.id})\n"
         f"**Moderator:** {moderator.mention} ({moderator.id})\n"
