@@ -1,27 +1,45 @@
+
+
 import discord
 from discord.ext import commands
-import asyncio # Needed for unmute/mute timing
-import datetime # Needed for timestamps
-from typing import Optional 
+import asyncio
+from datetime import datetime, timezone # Import datetime and timezone specifically for utc
+from typing import Optional
 from discord import app_commands
+import json # Ensure json is imported for loading/saving data
 
 # Import your helper functions from utils.py
-from utils import load_warnings, save_warnings, load_modlog_settings, save_modlog_settings, send_modlog_embed, parse_duration , load_blacklists , save_blacklists
+from utils import (
+    load_warnings, save_warnings,
+    load_modlog_settings, save_modlog_settings,
+    send_modlog_embed, parse_duration,
+    load_blacklists, save_blacklists,
+    load_confession_channels, save_confession_channels # Added for confession commands
+)
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         # You can keep track of muted users if needed, though Discord's timeout handles most of it
-        self.muted_users = {} 
+        self.muted_users = {}
 
-        # --- Automod Configuration (PLACEHOLDERS) ---
-        # --- NEW: Load dynamic blacklists ---
-        self.all_blacklists_data = load_blacklists() 
+        # Load all warnings data
+        self.all_warnings_data = load_warnings()
+        print(f"Loaded all warnings data: {self.all_warnings_data}")
+
+        # Load modlog settings (if used)
+        self.all_modlog_settings = load_modlog_settings()
+        print(f"Loaded all modlog settings: {self.all_modlog_settings}")
+
+        # Load dynamic blacklists
+        self.all_blacklists_data = load_blacklists()
         print(f"Loaded all blacklists data: {self.all_blacklists_data}")
 
+        # Load confession channel data (NEW)
+        self.confession_channels_data = load_confession_channels()
+        print(f"Loaded confession channels data: {self.confession_channels_data}")
 
-    # --- Hierarchy Check Helper Method ---
-    # This helper is specific to moderation commands, so it's a method of this cog
+    # --- Helper Method: Hierarchy Check ---
     async def _check_hierarchy(self, ctx, member, action_name):
         """Checks if the bot or author can perform an action on a member based on role hierarchy."""
         if member == self.bot.user:
@@ -42,6 +60,118 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['CROWN']} I cannot {action_name} that member because their highest role is equal to or higher than my highest role. Please move my role higher. {self.bot.EMOJIS['CROWN']}")
             return False
         return True
+
+    # --- Helper Method: Get Guild Blacklists ---
+    def _get_guild_blacklists(self, guild_id: str):
+        if guild_id not in self.all_blacklists_data:
+            self.all_blacklists_data[guild_id] = {"blacklisted_words": [], "blacklisted_links": []}
+        return self.all_blacklists_data[guild_id]
+
+    # --- Automod on_message event listener ---
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        """Automod logic to delete blacklisted words and links, and handle interactive responses."""
+
+        # 1. Ignore messages from bots themselves
+        if message.author.bot:
+            return
+
+        # 2. Ignore DMs
+        if message.guild is None:
+            return
+
+        # 3. IMPORTANT: Ignore messages that are commands.
+        # This prevents the automod from triggering on command invocations themselves.
+        # The bot's built-in command handler will process these.
+        if message.content.lower().startswith(self.bot.command_prefix.lower()):
+            return # If it's a command, just exit this listener early.
+
+        # --- Automod logic (now runs AFTER the command check) ---
+        guild_id = str(message.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        blacklisted_words_for_guild = guild_blacklists.get("blacklisted_words", [])
+        blacklisted_links_for_guild = guild_blacklists.get("blacklisted_links", [])
+
+        # Check for blacklisted words
+        for word in blacklisted_words_for_guild:
+            if word.lower() in message.content.lower():
+                try:
+                    await message.delete()
+                    await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that word is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
+                    print(f"Deleted message from {message.author.name} for blacklisted word in {message.channel.name}.")
+                    await send_modlog_embed(
+                        self.bot,
+                        message.guild,
+                        "Automod: Blacklisted Word",
+                        message.author,
+                        self.bot.user,
+                        f"Used blacklisted word: '{word}'"
+                    )
+                    return # Stop processing after finding one blacklisted word and deleting
+                except discord.Forbidden:
+                    print(f"Bot lacks permissions to delete messages in {message.channel.name}.")
+                    return
+                except Exception as e:
+                    print(f"Error deleting message for blacklisted word: {e}")
+                    return
+
+        # Check for blacklisted links
+        for link in blacklisted_links_for_guild:
+            if link.lower() in message.content.lower():
+                try:
+                    await message.delete()
+                    await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that link is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
+                    print(f"Deleted message from {message.author.name} for blacklisted link in {message.channel.name}.")
+                    await send_modlog_embed(
+                        self.bot,
+                        message.guild,
+                        "Automod: Blacklisted Link",
+                        message.author,
+                        self.bot.user,
+                        f"Posted blacklisted link: '{link}'"
+                    )
+                    return # Stop processing after finding one blacklisted link and deleting
+                except discord.Forbidden:
+                    print(f"Bot lacks permissions to delete messages for links in {message.channel.name}.")
+                    return
+                except Exception as e:
+                    print(f"Error deleting message for blacklisted link: {e}")
+                    return
+
+        # --- Interactive Responses (These now run AFTER automod and command checks) ---
+        msg_content = message.content.lower()
+
+        if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
+            await message.channel.send(f"You're very welcome, {message.author.mention}! Glad I could help. {self.bot.EMOJIS['HEART']}")
+            return
+
+        if "love you eli" in msg_content or "ily eli" in msg_content :
+            await message.channel.send(f"Aww, I love you too, {message.author.mention}! {self.bot.EMOJIS['MANYBUTTERFLIES']}")
+            return
+
+        if "hello" in msg_content:
+            words = msg_content.split()
+            if "hello" in words or any(word.startswith("hello") for word in words) or any(word.endswith("hello") for word in words):
+                await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
+                return
+
+        if "good morning" in msg_content:
+            await message.channel.send(f"Good morning, {message.author.mention}! Hope you have a wonderful day. {self.bot.EMOJIS['STAR']}")
+            return
+
+        if "what can you do" in msg_content or "what are your commands" in msg_content:
+            await message.channel.send(f"I can do quite a lot! Type `{self.bot.command_prefix}cmds` to see all my commands. {self.bot.EMOJIS['RIBBON']}")
+            return
+
+        if "bye" in msg_content or "goodbye" in msg_content:
+            await message.channel.send(f"See you later, {message.author.mention}! {self.bot.EMOJIS['BUTTERFLY']}")
+            return
+
+        if "eli" in msg_content:
+            words = msg_content.split()
+            if "eli" in words or any(word.startswith("eli") for word in words) or any(word.endswith("eli") for word in words):
+                await message.channel.send(f"Hello {message.author.mention}, how may I help you? {self.bot.EMOJIS['HEART']}")
+                return
 
     # --- Warn Command ---
     @commands.command(name='warn')
@@ -65,7 +195,7 @@ class Moderation(commands.Cog):
         warnings[guild_id][user_id].append({
             'reason': reason,
             'moderator_id': ctx.author.id,
-            'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         save_warnings(warnings)
 
@@ -132,7 +262,7 @@ class Moderation(commands.Cog):
         embed = discord.Embed(
             title=f"{self.bot.EMOJIS['STAR']} Warnings for {member.display_name} {self.bot.EMOJIS['STAR']}",
             color=0xFFB6C1,
-            timestamp=datetime.datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
         embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
@@ -140,7 +270,7 @@ class Moderation(commands.Cog):
         for i, warning in enumerate(user_warnings):
             moderator = self.bot.get_user(warning['moderator_id'])
             mod_name = moderator.mention if moderator else "Unknown User"
-            timestamp = datetime.datetime.fromisoformat(warning['timestamp'])
+            timestamp = datetime.fromisoformat(warning['timestamp'])
             embed.add_field(
                 name=f"Warning #{i+1}",
                 value=(
@@ -169,9 +299,9 @@ class Moderation(commands.Cog):
     async def clearwarnings(self, ctx, member: discord.Member, num_or_index: Optional[int] = None):
         """Clears all warnings, a specific warning, or a number of recent warnings for a member.
         Usage:
-        - eli clearwarnings <@user/ID>             -> Clears ALL warnings for the user.
-        - eli clearwarnings <@user/ID> <index>     -> Removes a specific warning by its number (e.g., '1' for the first warning).
-        - eli clearwarnings <@user/ID> -<count>    -> Removes the last <count> warnings (e.g., '-1' for the latest, '-2' for the two latest).
+        - eli clearwarnings <@user/ID> -> Clears ALL warnings for the user.
+        - eli clearwarnings <@user/ID> <index> -> Removes a specific warning by its number (e.g., '1' for the first warning).
+        - eli clearwarnings <@user/ID> -<count> -> Removes the last <count> warnings (e.g., '-1' for the latest, '-2' for the two latest).
         """
 
         if not await self._check_hierarchy(ctx, member, "clear warnings for"):
@@ -186,7 +316,6 @@ class Moderation(commands.Cog):
             return
 
         # Get a direct reference to the user's warnings list within the main data structure
-        # We'll use this reference to access and potentially modify the list.
         current_user_warnings_list = warnings_data[guild_id][user_id]
         warnings_count = len(current_user_warnings_list)
 
@@ -196,11 +325,11 @@ class Moderation(commands.Cog):
         if num_or_index is None:
             # Scenario 1: Clear all warnings
             action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully cleared all {warnings_count} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
-            
+
             modlog_details_list.append(f"Cleared all {warnings_count} warnings.")
             for i, warning in enumerate(current_user_warnings_list):
-                modlog_details_list.append(f"  - Warning #{i+1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
-            
+                modlog_details_list.append(f"  - Warning #{i+1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
+
             del warnings_data[guild_id][user_id] # This directly modifies warnings_data
 
         elif num_or_index > 0:
@@ -213,11 +342,11 @@ class Moderation(commands.Cog):
 
             removed_warning = current_user_warnings_list.pop(warning_index_to_remove) # .pop() modifies the list in place
             action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully removed warning #{num_or_index} for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
-            
+
             modlog_details_list.append(f"Removed specific warning #{num_or_index}.")
-            modlog_details_list.append(f"  - Reason: '{removed_warning['reason']}'")
-            modlog_details_list.append(f"  - Moderator: <@{removed_warning['moderator_id']}>")
-            modlog_details_list.append(f"  - Timestamp: {removed_warning['timestamp']}")
+            modlog_details_list.append(f"  - Reason: '{removed_warning['reason']}'")
+            modlog_details_list.append(f"  - Moderator: <@{removed_warning['moderator_id']}>")
+            modlog_details_list.append(f"  - Timestamp: {removed_warning['timestamp']}")
 
         else: # num_or_index < 0
             # Scenario 3: Remove the last 'count' warnings
@@ -226,23 +355,18 @@ class Moderation(commands.Cog):
             if count_to_remove > warnings_count:
                 await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Cannot remove {count_to_remove} warnings, {member.display_name} only has {warnings_count}. {self.bot.EMOJIS['SPARKLE']}")
                 return
-            
+
             removed_warnings = current_user_warnings_list[-count_to_remove:] # Get the warnings that will be removed for logging
-            
-            # --- THE CRUCIAL FIX IS HERE ---
-            # We directly update the list in warnings_data with the new, truncated list
+
             warnings_data[guild_id][user_id] = current_user_warnings_list[:-count_to_remove]
-            # The local variable current_user_warnings_list now refers to the old, full list,
-            # but the important part is that warnings_data is correctly updated.
-            
+
             action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully removed the last {count_to_remove} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
 
             modlog_details_list.append(f"Removed the last {count_to_remove} warnings.")
             for i, warning in enumerate(removed_warnings):
-                modlog_details_list.append(f"  - Warning #{warnings_count - count_to_remove + i + 1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
+                modlog_details_list.append(f"  - Warning #{warnings_count - count_to_remove + i + 1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
 
         # After modification, check if the user's warning list for the guild became empty
-        # Use warnings_data[guild_id].get(user_id) to safely access potentially deleted keys
         if guild_id in warnings_data and not warnings_data[guild_id].get(user_id):
             if user_id in warnings_data[guild_id]: # Ensure the key exists before deleting
                 del warnings_data[guild_id][user_id] # If empty, remove the user's entry
@@ -263,9 +387,19 @@ class Moderation(commands.Cog):
             "Warnings Cleared", # Action type for the log
             member, # User who had warnings cleared
             ctx.author, # Moderator who cleared the warnings
-            f"**Action:** {action_feedback_msg.replace(self.bot.EMOJIS['HEART'], '').strip()}\n\n" + 
+            f"**Action:** {action_feedback_msg.replace(self.bot.EMOJIS['HEART'], '').strip()}\n\n" +
             "**Details:**\n" + "\n".join(modlog_details_list) # Combine details for the log
         )
+
+    @clearwarnings.error
+    async def clearwarnings_error(self, ctx, error):
+        if isinstance(error, commands.MissingPermissions):
+            await ctx.send(f"{self.bot.EMOJIS['CROWN']} You don't have permission to clear warnings. You need the 'Kick Members' permission. {self.bot.EMOJIS['CROWN']}")
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Could not find that member. Please make sure you spelled the name correctly or provided a valid ID/mention. {self.bot.EMOJIS['SPARKLE']}")
+        else:
+            await ctx.send(f"{self.bot.EMOJIS['HEART']} An error occurred: {error} {self.bot.EMOJIS['HEART']}")
+            print(f"Error in clearwarnings: {error}")
 
     # --- Kick Command ---
     @commands.command(name='kick')
@@ -434,7 +568,7 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide a valid user ID to unban. Usage: `eli unban <user_id> [reason]` {self.bot.EMOJIS['SPARKLE']}")
         else:
             await ctx.send(f"{self.bot.EMOJIS['HEART']} An error occurred: {error} {self.bot.EMOJIS['HEART']}")
-            print(f"Error in unban_user: {error}")
+            print(f"Error in unmute_user: {error}")
 
     # --- Purge Command ---
     @commands.command(name='purge')
@@ -510,7 +644,7 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Invalid duration format. Use s, m, h, d, w (e.g., `30s`, `5m`, `1h`, `2d`, `1w`). {self.bot.EMOJIS['SPARKLE']}")
             return
 
-        timeout_until = datetime.datetime.now(datetime.timezone.utc) + time_delta
+        timeout_until = datetime.now(timezone.utc) + time_delta
 
         # Discord's timeout limit is 28 days (4 weeks)
         if time_delta.total_seconds() > 28 * 24 * 60 * 60:
@@ -640,7 +774,6 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['HEART']} An error occurred: {error} {self.bot.EMOJIS['HEART']}")
             print(f"Error in unmute_user: {error}")
 
-
     # ----- SetModLogChannel command -----
     @commands.command(name='setmodlogchannel')
     @commands.has_permissions(manage_guild=True)
@@ -670,118 +803,7 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['HEART']} An error occurred: {error} {self.bot.EMOJIS['HEART']}")
             print(f"Error in set_modlog_channel: {error}")
 
-    # --- Automod on_message event listener ---
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        """Automod logic to delete blacklisted words and links, and handle interactive responses."""
-
-        # 1. Ignore messages from bots themselves
-        if message.author.bot:
-            return
-
-        # 2. Ignore DMs
-        if message.guild is None:
-            return
-
-        # 3. IMPORTANT: Ignore messages that are commands.
-        # This prevents the automod from triggering on command invocations themselves.
-        # The bot's built-in command handler will process these.
-        if message.content.lower().startswith(self.bot.command_prefix.lower()):
-            return # If it's a command, just exit this listener early.
-
-        # --- Automod logic (now runs AFTER the command check) ---
-        guild_id = str(message.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-        blacklisted_words_for_guild = guild_blacklists.get("blacklisted_words", [])
-        blacklisted_links_for_guild = guild_blacklists.get("blacklisted_links", [])
-
-        # Check for blacklisted words
-        for word in blacklisted_words_for_guild: 
-            if word.lower() in message.content.lower():
-                try:
-                    await message.delete()
-                    await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that word is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
-                    print(f"Deleted message from {message.author.name} for blacklisted word in {message.channel.name}.")
-                    await send_modlog_embed(
-                        self.bot,
-                        message.guild,
-                        "Automod: Blacklisted Word",
-                        message.author,
-                        self.bot.user,
-                        f"Used blacklisted word: '{word}'"
-                    )
-                    return # Stop processing after finding one blacklisted word and deleting
-                except discord.Forbidden:
-                    print(f"Bot lacks permissions to delete messages in {message.channel.name}.")
-                    return
-                except Exception as e:
-                    print(f"Error deleting message for blacklisted word: {e}")
-                    return
-
-        # Check for blacklisted links
-        for link in blacklisted_links_for_guild: 
-            if link.lower() in message.content.lower():
-                try:
-                    await message.delete()
-                    await message.channel.send(f"{self.bot.EMOJIS['SPARKLE']} {message.author.mention}, that link is not allowed! {self.bot.EMOJIS['SPARKLE']}", delete_after=5)
-                    print(f"Deleted message from {message.author.name} for blacklisted link in {message.channel.name}.")
-                    await send_modlog_embed(
-                        self.bot,
-                        message.guild,
-                        "Automod: Blacklisted Link",
-                        message.author,
-                        self.bot.user,
-                        f"Posted blacklisted link: '{link}'"
-                    )
-                    return # Stop processing after finding one blacklisted link and deleting
-                except discord.Forbidden:
-                    print(f"Bot lacks permissions to delete messages for links in {message.channel.name}.")
-                    return
-                except Exception as e:
-                    print(f"Error deleting message for blacklisted link: {e}")
-                    return
-        
-        # --- Interactive Responses (These now run AFTER automod and command checks) ---
-        msg_content = message.content.lower()
-
-        if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
-                await message.channel.send(f"You're very welcome, {message.author.mention}! Glad I could help. {self.bot.EMOJIS['HEART']}")
-                return
-
-        if "love you eli" in msg_content or "ily eli" in msg_content :
-                await message.channel.send(f"Aww, I love you too, {message.author.mention}! {self.bot.EMOJIS['MANYBUTTERFLIES']}")
-                return
-
-        if "hello" in msg_content:
-              words = msg_content.split()
-              if "hello" in words or any(word.startswith("hello") for word in words) or any(word.endswith("hello") for word in words):
-                  await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
-                  return
-        
-        if "good morning" in msg_content:
-                await message.channel.send(f"Good morning, {message.author.mention}! Hope you have a wonderful day. {self.bot.EMOJIS['STAR']}")
-                return
-        
-        if "what can you do" in msg_content or "what are your commands" in msg_content:
-                await message.channel.send(f"I can do quite a lot! Type `{self.bot.command_prefix}cmds` to see all my commands. {self.bot.EMOJIS['RIBBON']}")
-                return
-        
-        if "bye" in msg_content or "goodbye" in msg_content:
-                await message.channel.send(f"See you later, {message.author.mention}! {self.bot.EMOJIS['BUTTERFLY']}")
-                return
-        
-        if "eli" in msg_content:
-            words = msg_content.split()
-            if "eli" in words or any(word.startswith("eli") for word in words) or any(word.endswith("eli") for word in words):
-                await message.channel.send(f"Hello {message.author.mention}, how may I help you? {self.bot.EMOJIS['HEART']}")
-                return
-
-        # You can add more interactive responses here following the same pattern:
-        # if "your_phrase" in msg_content:
-        #     await message.channel.send(f"Your response!")
-        #     return # Crucial to stop after one response
-
-     # --- Blacklist Management Group Commands ---
+    # --- Blacklist Management Group Commands ---
     @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -791,12 +813,6 @@ class Moderation(commands.Cog):
         """
         if ctx.invoked_subcommand is None:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
-
-    def _get_guild_blacklists(self, guild_id: str):
-        if guild_id not in self.all_blacklists_data:
-            self.all_blacklists_data[guild_id] = {"blacklisted_words": [], "blacklisted_links": []}
-        return self.all_blacklists_data[guild_id]
-
 
     @blacklist_group.command(name='addword')
     async def blacklist_addword(self, ctx, *words_input: str): # Renamed to words_input for clarity
@@ -809,10 +825,10 @@ class Moderation(commands.Cog):
 
         guild_id = str(ctx.guild.id)
         guild_blacklists = self._get_guild_blacklists(guild_id)
-        
+
         added_count = 0
         skipped_words = []
-        
+
         # --- NEW PARSING LOGIC ---
         # Join all parts of the input, then split by commas.
         # Each part is then further split by whitespace to handle 'word1, word2'
@@ -820,7 +836,7 @@ class Moderation(commands.Cog):
         full_input_string = " ".join(words_input)
         for part_by_comma in full_input_string.split(','):
             # Split each comma-separated part by whitespace
-            for final_word_candidate in part_by_comma.split(): 
+            for final_word_candidate in part_by_comma.split():
                 cleaned_word = final_word_candidate.lower().strip()
                 if cleaned_word: # Ensure it's not empty after stripping
                     processed_words.append(cleaned_word)
@@ -834,17 +850,17 @@ class Moderation(commands.Cog):
             if word in guild_blacklists["blacklisted_words"]:
                 # Use the originally provided word (before cleaning) for better feedback,
                 # or the cleaned word if you prefer consistency. Using cleaned word for skipped.
-                skipped_words.append(word) 
+                skipped_words.append(word)
             else:
                 guild_blacklists["blacklisted_words"].append(word)
                 added_count += 1
-        
+
         if added_count > 0:
-            save_blacklists(self.all_blacklists_data) 
+            save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} word(s) to this server's blacklisted words list."
             if skipped_words:
                 feedback += f"\nSkipped {len(skipped_words)} word(s) already present: `{'`, `'.join(skipped_words)}`."
-            
+
             await ctx.send(feedback)
             await send_modlog_embed(
                 self.bot,
@@ -857,7 +873,6 @@ class Moderation(commands.Cog):
         else:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new words were added. All provided words were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
 
-
     @blacklist_group.command(name='removeword', aliases=['delword'])
     async def blacklist_removeword(self, ctx, *words_input: str): # Renamed to words_input
         """Removes one or more words from the blacklisted words list for this server.
@@ -869,7 +884,7 @@ class Moderation(commands.Cog):
 
         guild_id = str(ctx.guild.id)
         guild_blacklists = self._get_guild_blacklists(guild_id)
-        
+
         removed_count = 0
         skipped_words = []
 
@@ -886,13 +901,14 @@ class Moderation(commands.Cog):
         if not processed_words:
             return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid words were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
 
+
         for word in processed_words:
             if word in guild_blacklists["blacklisted_words"]:
                 guild_blacklists["blacklisted_words"].remove(word)
                 removed_count += 1
             else:
                 skipped_words.append(word)
-        
+
         if removed_count > 0:
             save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} word(s) from this server's blacklisted words list."
@@ -930,7 +946,6 @@ class Moderation(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-
     @blacklist_group.command(name='addlink')
     async def blacklist_addlink(self, ctx, *links_input: str): # Renamed to links_input
         """Adds one or more links to the blacklisted links list for this server.
@@ -942,7 +957,7 @@ class Moderation(commands.Cog):
 
         guild_id = str(ctx.guild.id)
         guild_blacklists = self._get_guild_blacklists(guild_id)
-        
+
         added_count = 0
         skipped_links = []
 
@@ -965,7 +980,7 @@ class Moderation(commands.Cog):
             else:
                 guild_blacklists["blacklisted_links"].append(link)
                 added_count += 1
-        
+
         if added_count > 0:
             save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} link(s) to this server's blacklisted links list."
@@ -983,7 +998,6 @@ class Moderation(commands.Cog):
         else:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new links were added. All provided links were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
 
-
     @blacklist_group.command(name='removelink', aliases=['dellink'])
     async def blacklist_removelink(self, ctx, *links_input: str): # Renamed to links_input
         """Removes one or more links from the blacklisted links list for this server.
@@ -995,7 +1009,7 @@ class Moderation(commands.Cog):
 
         guild_id = str(ctx.guild.id)
         guild_blacklists = self._get_guild_blacklists(guild_id)
-        
+
         removed_count = 0
         skipped_links = []
 
@@ -1019,7 +1033,7 @@ class Moderation(commands.Cog):
                 removed_count += 1
             else:
                 skipped_links.append(link)
-        
+
         if removed_count > 0:
             save_blacklists(self.all_blacklists_data)
             feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} link(s) from this server's blacklisted links list."
@@ -1057,8 +1071,93 @@ class Moderation(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    # Add more error handlers if needed for moderation commands.
-    # A general error handler for the cog can be implemented as shown in General cog.
+    # --- NEW: /setconfessionchannel Slash Command ---
+    @app_commands.command(name='setconfessionchannel', description='Sets the channel for anonymous confessions.')
+    @app_commands.describe(channel='The channel where confessions will be sent.')
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_channels=True)
+    async def set_confession_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = str(interaction.guild.id)
+        self.confession_channels_data[guild_id] = channel.id
+        save_confession_channels(self.confession_channels_data)
+
+        await interaction.followup.send(
+            f"{self.bot.EMOJIS['HEART']} Confessions channel set to {channel.mention} for this server. {self.bot.EMOJIS['HEART']}"
+        )
+        await send_modlog_embed(
+            self.bot,
+            interaction.guild,
+            "Confession Channel Set",
+            interaction.user,
+            self.bot.user,
+            f"Confession channel set to {channel.mention}"
+        )
+
+    # --- NEW: /confess Slash Command ---
+    @app_commands.command(name='confess', description='Send an anonymous confession.')
+    @app_commands.describe(message='Your anonymous confession message.')
+    @app_commands.guild_only()
+    async def confess(self, interaction: discord.Interaction, message: str):
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = str(interaction.guild.id)
+        confession_channel_id = self.confession_channels_data.get(guild_id)
+
+        if not confession_channel_id:
+            return await interaction.followup.send(
+                f"{self.bot.EMOJIS['SPARKLE']} A confession channel has not been set up for this server. "
+                f"An admin needs to use `/setconfessionchannel` first. {self.bot.EMOJIS['SPARKLE']}",
+                ephemeral=True
+            )
+
+        confession_channel = interaction.guild.get_channel(confession_channel_id)
+        if not confession_channel or not isinstance(confession_channel, discord.TextChannel):
+            # If the channel is gone or not a text channel, remove it from settings
+            del self.confession_channels_data[guild_id]
+            save_confession_channels(self.confession_channels_data)
+            return await interaction.followup.send(
+                f"{self.bot.EMOJIS['SPARKLE']} The configured confession channel no longer exists or is not a text channel. "
+                f"Please set a new one using `/setconfessionchannel`. {self.bot.EMOJIS['SPARKLE']}",
+                ephemeral=True
+            )
+
+        embed = discord.Embed(
+            title=f"{self.bot.EMOJIS['HEART']} Anonymous Confession {self.bot.EMOJIS['HEART']}",
+            description=message,
+            color=0xFFB6C1
+        )
+        embed.set_footer(text=f"Confession received at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+        try:
+            await confession_channel.send(embed=embed)
+            await interaction.followup.send(
+                f"{self.bot.EMOJIS['HEART']} Your confession has been sent anonymously! {self.bot.EMOJIS['HEART']}",
+                ephemeral=True
+            )
+            print(f"Confession by {interaction.user} (ID: {interaction.user.id}) in {interaction.guild.name} (ID: {interaction.guild.id}): {message}")
+            await send_modlog_embed(
+                self.bot,
+                interaction.guild,
+                "New Anonymous Confession",
+                interaction.user, # The actual user who confessed (for logging, not displayed publicly)
+                self.bot.user, # The bot is the "moderator" for this action
+                f"Confession: {message}\nChannel: {confession_channel.mention}"
+            )
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"{self.bot.EMOJIS['ERROR']} I don't have permission to send messages in {confession_channel.mention}. "
+                f"Please check my permissions. {self.bot.EMOJIS['ERROR']}",
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"{self.bot.EMOJIS['ERROR']} An error occurred while sending your confession: {e} {self.bot.EMOJIS['ERROR']}",
+                ephemeral=True
+            )
+
+    # --- Cog Error Handler ---
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
         if hasattr(ctx.command, 'on_error'):
@@ -1076,8 +1175,14 @@ class Moderation(commands.Cog):
             # You might want to send a generic error message or log it
             # await ctx.send(f"{self.bot.EMOJIS['HEART']} An unexpected error occurred in a moderation command: {error} {self.bot.EMOJIS['HEART']}")
 
-
 # --- Setup function for the cog ---
 # This function is REQUIRED for discord.py to load the cog
 async def setup(bot):
+    # This line loads the Moderation cog and automatically registers
+    # all commands (prefix and slash) defined within it.
     await bot.add_cog(Moderation(bot))
+
+    # IMPORTANT: Do NOT manually add app_commands that are already defined inside a cog.
+    # bot.add_cog() handles this automatically.
+    # If you have other slash commands in main.py that are NOT part of a cog,
+    # you would add them to bot.tree there.

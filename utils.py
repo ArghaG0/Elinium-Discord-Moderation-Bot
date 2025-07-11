@@ -43,6 +43,25 @@ def save_blacklists(blacklists_data):
     with open(BLACKLISTS_FILE, 'w') as f:
         json.dump(blacklists_data, f, indent=4)
 
+# --- Confession helper function ---
+CONFESSION_CHANNELS_FILE = 'confession_channels.json'
+
+def load_confession_channels():
+    """Loads per-guild confession channel IDs from confession_channels.json."""
+    try:
+        with open(CONFESSION_CHANNELS_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from {CONFESSION_CHANNELS_FILE}. Returning empty dictionary for confession channels.")
+        return {}
+
+def save_confession_channels(channels_data):
+    """Saves per-guild confession channel IDs to confession_channels.json."""
+    with open(CONFESSION_CHANNELS_FILE, 'w') as f:
+        json.dump(channels_data, f, indent=4)
+
 
 # --- Helper Functions for Modlog Channel ---
 MODLOG_SETTINGS_FILE = 'modlog_settings.json'
