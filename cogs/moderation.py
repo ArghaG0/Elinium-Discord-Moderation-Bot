@@ -760,7 +760,7 @@ class Moderation(commands.Cog):
                 await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
                 return # Stop here
         
-        if "good morning" in msg_content or "gm" in msg_content:
+        if "good morning" in msg_content:
                 await message.channel.send(f"Good morning, {message.author.mention}! Hope you have a wonderful day. {self.bot.EMOJIS['STAR']}")
                 return
         
