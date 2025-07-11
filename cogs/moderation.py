@@ -636,12 +636,6 @@ class Moderation(commands.Cog):
         if "love you eli" in msg_content or "ily eli" in msg_content :
                 await message.channel.send(f"Aww, I love you too, {message.author.mention}! {self.bot.EMOJIS['MANYBUTTERFLIES']}")
                 return
-        
-        if "hi" in msg_content:
-                words = msg_content.split()
-                if "hi" in words or any(word.startswith("hi") for word in words) or any(word.endswith("hi") for word in words):
-                    await message.channel.send(f"Hi there, {message.author.mention}! {self.bot.EMOJIS['FLOWER']}")
-                    return
 
         # Respond if someone says "hello"
         if "hello" in msg_content:
