@@ -620,6 +620,66 @@ class Moderation(commands.Cog):
                 except Exception as e:
                     print(f"Error deleting message for blacklisted link: {e}")
                     return
+        
+         # --- Interactive Responses (run these after automod) ---
+        # Do not respond if the message is a command (starts with the bot's prefix)
+        if message.content.lower().startswith(self.bot.command_prefix.lower()):
+            return
+
+        # Convert message content to lowercase for easier comparison
+        msg_content = message.content.lower()
+
+        if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
+                await message.channel.send(f"You're very welcome, {message.author.mention}! Glad I could help. {self.bot.EMOJIS['HEART']}")
+                return
+
+        if "love you eli" in msg_content or "ily eli" in msg_content :
+                await message.channel.send(f"Aww, I love you too, {message.author.mention}! {self.bot.EMOJIS['MANYBUTTERFLIES']}")
+                return
+        
+        if "hi" in msg_content:
+                words = msg_content.split()
+                if "hi" in words or any(word.startswith("hi") for word in words) or any(word.endswith("hi") for word in words):
+                    await message.channel.send(f"Hi there, {message.author.mention}! {self.bot.EMOJIS['FLOWER']}")
+                    return
+
+        # Respond if someone says "hello"
+        if "hello" in msg_content:
+             words = msg_content.split()
+             if "hello" in words or any(word.startswith("hello") for word in words) or any(word.endswith("hello") for word in words):
+                await message.channel.send(f"Hello, {message.author.mention}! {self.bot.EMOJIS['SPARKLE']}")
+                return # Stop here
+        
+        if "good morning" in msg_content or "gm" in msg_content:
+                await message.channel.send(f"Good morning, {message.author.mention}! Hope you have a wonderful day. {self.bot.EMOJIS['STAR']}")
+                return
+        
+        if "what can you do" in msg_content or "what are your commands" in msg_content:
+                await message.channel.send(f"I can do quite a lot! Type `{self.bot.command_prefix}cmds` to see all my commands. {self.bot.EMOJIS['RIBBON']}")
+                return
+        
+        if "bye" in msg_content or "goodbye" in msg_content:
+                await message.channel.send(f"See you later, {message.author.mention}! {self.bot.EMOJIS['BUTTERFLY']}")
+                return
+        
+        # Respond if someone says "eli"
+        if "eli" in msg_content:
+            # Add a check to prevent responding if "eli" is just part of a longer word
+            # This simple check ensures "eli" is either a standalone word or at the start/end
+            # For more robust checking, you'd use regex (but this is simpler for now)
+            words = msg_content.split()
+            if "eli" in words or any(word.startswith("eli") for word in words) or any(word.endswith("eli") for word in words):
+                await message.channel.send(f"Hello {message.author.mention}, how may I help you? {self.bot.EMOJIS['HEART']}")
+                return # Stop here to prevent multiple responses for one message
+        
+        
+    
+        
+
+        # You can add more interactive responses here following the same pattern:
+        # if "your_phrase" in msg_content:
+        #     await message.channel.send(f"Your response!")
+        #     return # Crucial to stop after one response
 
     # Add more error handlers if needed for moderation commands.
     # A general error handler for the cog can be implemented as shown in General cog.
