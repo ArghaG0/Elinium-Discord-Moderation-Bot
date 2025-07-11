@@ -671,29 +671,29 @@ class Moderation(commands.Cog):
     # --- Automod on_message event listener ---
     @commands.Cog.listener()
     async def on_message(self, message):
-        """Automod logic to delete blacklisted words and links."""
+        """Automod logic to delete blacklisted words and links, and handle interactive responses."""
 
-        # Ignore messages from bots themselves
+        # 1. Ignore messages from bots themselves
         if message.author.bot:
             return
 
-        # Ignore DMs
+        # 2. Ignore DMs
         if message.guild is None:
             return
 
+        # 3. IMPORTANT: Ignore messages that are commands.
+        # This prevents the automod from triggering on command invocations themselves.
+        # The bot's built-in command handler will process these.
+        if message.content.lower().startswith(self.bot.command_prefix.lower()):
+            return # If it's a command, just exit this listener early.
+
+        # --- Automod logic (now runs AFTER the command check) ---
         guild_id = str(message.guild.id)
-
-        # Retrieve this guild's blacklist data
-        # Use the helper to ensure the guild's entry exists in self.all_blacklists_data
-        guild_blacklists = self._get_guild_blacklists(guild_id) # Uses the helper method below
-
-        # Get the actual lists for this guild
+        guild_blacklists = self._get_guild_blacklists(guild_id)
         blacklisted_words_for_guild = guild_blacklists.get("blacklisted_words", [])
         blacklisted_links_for_guild = guild_blacklists.get("blacklisted_links", [])
 
-
         # Check for blacklisted words
-        # (Regex matching will be added in a later step)
         for word in blacklisted_words_for_guild: 
             if word.lower() in message.content.lower():
                 try:
@@ -739,14 +739,9 @@ class Moderation(commands.Cog):
                     print(f"Error deleting message for blacklisted link: {e}")
                     return
         
-        # --- Interactive Responses (These run AFTER automod checks, and remain unchanged) ---
-        # Do not respond if the message is a command (starts with the bot's prefix)
-        if message.content.lower().startswith(self.bot.command_prefix.lower()):
-            return
-
+        # --- Interactive Responses (These now run AFTER automod and command checks) ---
         msg_content = message.content.lower()
 
-        # ... (Your existing interactive responses go here) ...
         if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
                 await message.channel.send(f"You're very welcome, {message.author.mention}! Glad I could help. {self.bot.EMOJIS['HEART']}")
                 return
@@ -783,7 +778,7 @@ class Moderation(commands.Cog):
         # if "your_phrase" in msg_content:
         #     await message.channel.send(f"Your response!")
         #     return # Crucial to stop after one response
-        
+
      # --- Blacklist Management Group Commands (Includes helper and per-guild logic) ---
     @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
     @commands.guild_only()
