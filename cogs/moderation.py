@@ -15,11 +15,8 @@ class Moderation(commands.Cog):
 
         # --- Automod Configuration (PLACEHOLDERS) ---
         # --- NEW: Load dynamic blacklists ---
-        blacklists = load_blacklists()
-        self.blacklisted_words = blacklists.get("blacklisted_words", [])
-        self.blacklisted_links = blacklists.get("blacklisted_links", [])
-        print(f"Loaded blacklisted words: {self.blacklisted_words}")
-        print(f"Loaded blacklisted links: {self.blacklisted_links}")
+        self.all_blacklists_data = load_blacklists() 
+        print(f"Loaded all blacklists data: {self.all_blacklists_data}")
 
     # --- Hierarchy Check Helper Method ---
     # This helper is specific to moderation commands, so it's a method of this cog
@@ -43,143 +40,6 @@ class Moderation(commands.Cog):
             await ctx.send(f"{self.bot.EMOJIS['CROWN']} I cannot {action_name} that member because their highest role is equal to or higher than my highest role. Please move my role higher. {self.bot.EMOJIS['CROWN']}")
             return False
         return True
-    
-    # --- NEW: Blacklist Management Group Commands ---
-    @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
-    @commands.guild_only()
-    @commands.has_permissions(manage_guild=True) # Require manage_guild permission to use any blacklist command
-    async def blacklist_group(self, ctx):
-        """Manages blacklisted words and links for AutoMod.
-        Use `eli help blacklist` for subcommands.
-        """
-        if ctx.invoked_subcommand is None:
-            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
-
-
-    @blacklist_group.command(name='addword')
-    async def blacklist_addword(self, ctx, *, word: str):
-        """Adds a word to the blacklisted words list.
-        Usage: `eli blacklist addword <word>`
-        """
-        word = word.lower().strip() # Store in lowercase for consistent matching
-        if word in self.blacklisted_words:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{word}' is already in the blacklisted words list. {self.bot.EMOJIS['SPARKLE']}")
-
-        self.blacklisted_words.append(word)
-        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
-        save_blacklists(blacklists_data)
-
-        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully added '{word}' to the blacklisted words list. {self.bot.EMOJIS['HEART']}")
-        await send_modlog_embed(
-            self.bot,
-            ctx.guild,
-            "Blacklist Update",
-            ctx.author, # Moderator who performed the action
-            self.bot.user, # Bot as the target, or ctx.author if you want to explicitly state the user's ID
-            f"Added blacklisted word: **`{word}`**"
-        )
-
-    @blacklist_group.command(name='removeword', aliases=['delword'])
-    async def blacklist_removeword(self, ctx, *, word: str):
-        """Removes a word from the blacklisted words list.
-        Usage: `eli blacklist removeword <word>`
-        """
-        word = word.lower().strip()
-        if word not in self.blacklisted_words:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{word}' is not found in the blacklisted words list. {self.bot.EMOJIS['SPARKLE']}")
-
-        self.blacklisted_words.remove(word)
-        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
-        save_blacklists(blacklists_data)
-
-        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully removed '{word}' from the blacklisted words list. {self.bot.EMOJIS['HEART']}")
-        await send_modlog_embed(
-            self.bot,
-            ctx.guild,
-            "Blacklist Update",
-            ctx.author,
-            self.bot.user,
-            f"Removed blacklisted word: **`{word}`**"
-        )
-
-    @blacklist_group.command(name='listwords')
-    async def blacklist_listwords(self, ctx):
-        """Lists all blacklisted words.
-        Usage: `eli blacklist listwords`
-        """
-        if not self.blacklisted_words:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted words currently. {self.bot.EMOJIS['SPARKLE']}")
-
-        words_list = "\n".join(f"- `{word}`" for word in self.blacklisted_words)
-        embed = discord.Embed(
-            title="<:sparkle:1256588611625160935> Blacklisted Words <a:sparkle:1256588611625160935>", # Use your custom sparkle emoji here
-            description=words_list,
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
-
-
-    @blacklist_group.command(name='addlink')
-    async def blacklist_addlink(self, ctx, *, link: str):
-        """Adds a link to the blacklisted links list.
-        Usage: `eli blacklist addlink <link>`
-        """
-        link = link.lower().strip()
-        if link in self.blacklisted_links:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{link}' is already in the blacklisted links list. {self.bot.EMOJIS['SPARKLE']}")
-
-        self.blacklisted_links.append(link)
-        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
-        save_blacklists(blacklists_data)
-
-        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully added '{link}' to the blacklisted links list. {self.bot.EMOJIS['HEART']}")
-        await send_modlog_embed(
-            self.bot,
-            ctx.guild,
-            "Blacklist Update",
-            ctx.author,
-            self.bot.user,
-            f"Added blacklisted link: **`{link}`**"
-        )
-
-    @blacklist_group.command(name='removelink', aliases=['dellink'])
-    async def blacklist_removelink(self, ctx, *, link: str):
-        """Removes a link from the blacklisted links list.
-        Usage: `eli blacklist removelink <link>`
-        """
-        link = link.lower().strip()
-        if link not in self.blacklisted_links:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} '{link}' is not found in the blacklisted links list. {self.bot.EMOJIS['SPARKLE']}")
-
-        self.blacklisted_links.remove(link)
-        blacklists_data = {"blacklisted_words": self.blacklisted_words, "blacklisted_links": self.blacklisted_links}
-        save_blacklists(blacklists_data)
-
-        await ctx.send(f"{self.bot.EMOJIS['HEART']} Successfully removed '{link}' from the blacklisted links list. {self.bot.EMOJIS['HEART']}")
-        await send_modlog_embed(
-            self.bot,
-            ctx.guild,
-            "Blacklist Update",
-            ctx.author,
-            self.bot.user,
-            f"Removed blacklisted link: **`{link}`**"
-        )
-
-    @blacklist_group.command(name='listlinks')
-    async def blacklist_listlinks(self, ctx):
-        """Lists all blacklisted links.
-        Usage: `eli blacklist listlinks`
-        """
-        if not self.blacklisted_links:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted links currently. {self.bot.EMOJIS['SPARKLE']}")
-
-        links_list = "\n".join(f"- `{link}`" for link in self.blacklisted_links)
-        embed = discord.Embed(
-            title="<:sparkle:1256588611625160935> Blacklisted Links <a:sparkle:1256588611625160935>", # Use your custom sparkle emoji here
-            description=links_list,
-            color=discord.Color.red()
-        )
-        await ctx.send(embed=embed)
 
     # --- Warn Command ---
     @commands.command(name='warn')
@@ -821,10 +681,20 @@ class Moderation(commands.Cog):
         if message.guild is None:
             return
 
-        # --- IMPORTANT FIX: Use self.blacklisted_words (lowercase 'b') ---
+        guild_id = str(message.guild.id)
+
+        # Retrieve this guild's blacklist data
+        # Use the helper to ensure the guild's entry exists in self.all_blacklists_data
+        guild_blacklists = self._get_guild_blacklists(guild_id) # Uses the helper method below
+
+        # Get the actual lists for this guild
+        blacklisted_words_for_guild = guild_blacklists.get("blacklisted_words", [])
+        blacklisted_links_for_guild = guild_blacklists.get("blacklisted_links", [])
+
+
         # Check for blacklisted words
-        for word in self.blacklisted_words: # <--- CHANGED FROM self.BLACKLISTED_WORDS
-            # Basic check for now, will refine with regex later
+        # (Regex matching will be added in a later step)
+        for word in blacklisted_words_for_guild: 
             if word.lower() in message.content.lower():
                 try:
                     await message.delete()
@@ -838,7 +708,7 @@ class Moderation(commands.Cog):
                         self.bot.user,
                         f"Used blacklisted word: '{word}'"
                     )
-                    return
+                    return # Stop processing after finding one blacklisted word and deleting
                 except discord.Forbidden:
                     print(f"Bot lacks permissions to delete messages in {message.channel.name}.")
                     return
@@ -846,9 +716,8 @@ class Moderation(commands.Cog):
                     print(f"Error deleting message for blacklisted word: {e}")
                     return
 
-        # --- IMPORTANT FIX: Use self.blacklisted_links (lowercase 'b') ---
         # Check for blacklisted links
-        for link in self.blacklisted_links: # <--- CHANGED FROM self.BLACKLISTED_LINKS
+        for link in blacklisted_links_for_guild: 
             if link.lower() in message.content.lower():
                 try:
                     await message.delete()
@@ -862,7 +731,7 @@ class Moderation(commands.Cog):
                         self.bot.user,
                         f"Posted blacklisted link: '{link}'"
                     )
-                    return
+                    return # Stop processing after finding one blacklisted link and deleting
                 except discord.Forbidden:
                     print(f"Bot lacks permissions to delete messages for links in {message.channel.name}.")
                     return
@@ -870,13 +739,14 @@ class Moderation(commands.Cog):
                     print(f"Error deleting message for blacklisted link: {e}")
                     return
         
-        # --- Interactive Responses (These remain unchanged) ---
+        # --- Interactive Responses (These run AFTER automod checks, and remain unchanged) ---
         # Do not respond if the message is a command (starts with the bot's prefix)
         if message.content.lower().startswith(self.bot.command_prefix.lower()):
             return
 
         msg_content = message.content.lower()
 
+        # ... (Your existing interactive responses go here) ...
         if "thank you eli" in msg_content or "thanks eli" in msg_content or "ty eli" in msg_content:
                 await message.channel.send(f"You're very welcome, {message.author.mention}! Glad I could help. {self.bot.EMOJIS['HEART']}")
                 return
@@ -913,6 +783,237 @@ class Moderation(commands.Cog):
         # if "your_phrase" in msg_content:
         #     await message.channel.send(f"Your response!")
         #     return # Crucial to stop after one response
+        
+     # --- Blacklist Management Group Commands (Includes helper and per-guild logic) ---
+    @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    async def blacklist_group(self, ctx):
+        """Manages blacklisted words and links for AutoMod.
+        Use `eli help blacklist` for subcommands.
+        """
+        if ctx.invoked_subcommand is None:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
+
+    # --- CORRECTED: Helper function to get/initialize guild blacklists ---
+    def _get_guild_blacklists(self, guild_id: str):
+        """Retrieves or initializes the blacklist data for a specific guild."""
+        if guild_id not in self.all_blacklists_data:
+            self.all_blacklists_data[guild_id] = {"blacklisted_words": [], "blacklisted_links": []}
+        return self.all_blacklists_data[guild_id]
+
+
+    @blacklist_group.command(name='addword')
+    async def blacklist_addword(self, ctx, *words_to_add: str):
+        """Adds one or more words to the blacklisted words list for this server.
+        Usage: `eli blacklist addword <word1> [word2] [word3]...`
+        """
+        if not words_to_add:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to add. {self.bot.EMOJIS['SPARKLE']}")
+
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        
+        added_count = 0
+        skipped_words = []
+
+        for word_raw in words_to_add:
+            word = word_raw.lower().strip()
+            if not word: 
+                continue
+            
+            if word in guild_blacklists["blacklisted_words"]:
+                skipped_words.append(word_raw) 
+            else:
+                guild_blacklists["blacklisted_words"].append(word)
+                added_count += 1
+        
+        if added_count > 0:
+            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} word(s) to this server's blacklisted words list."
+            if skipped_words:
+                feedback += f"\nSkipped {len(skipped_words)} word(s) already present: `{'`, `'.join(skipped_words)}`."
+            
+            await ctx.send(feedback)
+            await send_modlog_embed(
+                self.bot,
+                ctx.guild,
+                "Blacklist Update",
+                ctx.author,
+                self.bot.user,
+                f"Added {added_count} word(s) to server blacklist. Skipped {len(skipped_words)}: `{'`, `'.join(skipped_words)}`"
+            )
+        else:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new words were added. All provided words were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+
+
+    @blacklist_group.command(name='removeword', aliases=['delword'])
+    async def blacklist_removeword(self, ctx, *words_to_remove: str):
+        """Removes one or more words from the blacklisted words list for this server.
+        Usage: `eli blacklist removeword <word1> [word2] [word3]...`
+        """
+        if not words_to_remove:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to remove. {self.bot.EMOJIS['SPARKLE']}")
+
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        
+        removed_count = 0
+        skipped_words = []
+
+        for word_raw in words_to_remove:
+            word = word_raw.lower().strip()
+            if not word:
+                continue
+
+            if word in guild_blacklists["blacklisted_words"]:
+                guild_blacklists["blacklisted_words"].remove(word)
+                removed_count += 1
+            else:
+                skipped_words.append(word_raw)
+        
+        if removed_count > 0:
+            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} word(s) from this server's blacklisted words list."
+            if skipped_words:
+                feedback += f"\nSkipped {len(skipped_words)} word(s) not found: `{'`, `'.join(skipped_words)}`."
+            await ctx.send(feedback)
+            await send_modlog_embed(
+                self.bot,
+                ctx.guild,
+                "Blacklist Update",
+                ctx.author,
+                self.bot.user,
+                f"Removed {removed_count} word(s) from server blacklist. Skipped {len(skipped_words)}: `{'`, `'.join(skipped_words)}`"
+            )
+        else:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No words were removed. All provided words were not found in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+
+    @blacklist_group.command(name='listwords')
+    async def blacklist_listwords(self, ctx):
+        """Lists all blacklisted words for this server.
+        Usage: `eli blacklist listwords`
+        """
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        words_list_for_guild = guild_blacklists.get("blacklisted_words", [])
+
+        if not words_list_for_guild:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted words for this server currently. {self.bot.EMOJIS['SPARKLE']}")
+
+        words_formatted = "\n".join(f"- `{word}`" for word in words_list_for_guild)
+        embed = discord.Embed(
+            title=f"<:sparkle:1256588611625160935> Blacklisted Words for {ctx.guild.name} <a:sparkle:1256588611625160935>",
+            description=words_formatted,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+
+
+    @blacklist_group.command(name='addlink')
+    async def blacklist_addlink(self, ctx, *links_to_add: str):
+        """Adds one or more links to the blacklisted links list for this server.
+        Usage: `eli blacklist addlink <link1> [link2] [link3]...`
+        """
+        if not links_to_add:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to add. {self.bot.EMOJIS['SPARKLE']}")
+
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        
+        added_count = 0
+        skipped_links = []
+
+        for link_raw in links_to_add:
+            link = link_raw.lower().strip()
+            if not link:
+                continue
+
+            if link in guild_blacklists["blacklisted_links"]:
+                skipped_links.append(link_raw)
+            else:
+                guild_blacklists["blacklisted_links"].append(link)
+                added_count += 1
+        
+        if added_count > 0:
+            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} link(s) to this server's blacklisted links list."
+            if skipped_links:
+                feedback += f"\nSkipped {len(skipped_links)} link(s) already present: `{'`, `'.join(skipped_links)}`."
+            await ctx.send(feedback)
+            await send_modlog_embed(
+                self.bot,
+                ctx.guild,
+                "Blacklist Update",
+                ctx.author,
+                self.bot.user,
+                f"Added {added_count} link(s) to server blacklist. Skipped {len(skipped_links)}: `{'`, `'.join(skipped_links)}`"
+            )
+        else:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new links were added. All provided links were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+
+
+    @blacklist_group.command(name='removelink', aliases=['dellink'])
+    async def blacklist_removelink(self, ctx, *links_to_remove: str):
+        """Removes one or more links from the blacklisted links list for this server.
+        Usage: `eli blacklist removelink <link1> [link2] [link3]...`
+        """
+        if not links_to_remove:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to remove. {self.bot.EMOJIS['SPARKLE']}")
+
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        
+        removed_count = 0
+        skipped_links = []
+
+        for link_raw in links_to_remove:
+            link = link_raw.lower().strip()
+            if not link:
+                continue
+
+            if link in guild_blacklists["blacklisted_links"]:
+                guild_blacklists["blacklisted_links"].remove(link)
+                removed_count += 1
+            else:
+                skipped_links.append(link_raw)
+        
+        if removed_count > 0:
+            save_blacklists(self.all_blacklists_data) # IMPORTANT: Saving the entire self.all_blacklists_data
+            feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} link(s) from this server's blacklisted links list."
+            if skipped_links:
+                feedback += f"\nSkipped {len(skipped_links)} link(s) not found: `{'`, `'.join(skipped_links)}`."
+            await ctx.send(feedback)
+            await send_modlog_embed(
+                self.bot,
+                ctx.guild,
+                "Blacklist Update",
+                ctx.author,
+                self.bot.user,
+                f"Removed {removed_count} link(s) from server blacklist. Skipped {len(skipped_links)}: `{'`, `'.join(skipped_links)}`"
+            )
+        else:
+            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No links were removed. All provided links were not found in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+
+    @blacklist_group.command(name='listlinks')
+    async def blacklist_listlinks(self, ctx):
+        """Lists all blacklisted links for this server.
+        Usage: `eli blacklist listlinks`
+        """
+        guild_id = str(ctx.guild.id)
+        guild_blacklists = self._get_guild_blacklists(guild_id)
+        links_list_for_guild = guild_blacklists.get("blacklisted_links", [])
+
+        if not links_list_for_guild:
+            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted links for this server currently. {self.bot.EMOJIS['SPARKLE']}")
+
+        links_formatted = "\n".join(f"- `{link}`" for link in links_list_for_guild)
+        embed = discord.Embed(
+            title=f"<:sparkle:1256588611625160935> Blacklisted Links for {ctx.guild.name} <a:sparkle:1256588611625160935>",
+            description=links_formatted,
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
 
     # Add more error handlers if needed for moderation commands.
     # A general error handler for the cog can be implemented as shown in General cog.

@@ -23,23 +23,23 @@ def save_warnings(warnings_data):
         json.dump(warnings_data, f, indent=4)
 
 # --- NEW: Helper Functions for Blacklists ---
+# --- CORRECTED: Helper Functions for Per-Guild Blacklists ---
 BLACKLISTS_FILE = 'blacklists.json'
 
 def load_blacklists():
-    """Loads blacklisted words and links from blacklists.json."""
+    """Loads per-guild blacklisted words and links from blacklists.json."""
     try:
         with open(BLACKLISTS_FILE, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        # Return default structure if file doesn't exist
-        return {"blacklisted_words": [], "blacklisted_links": []}
+        # IMPORTANT: Return empty dict if file doesn't exist, to represent no guilds having blacklists yet
+        return {}
     except json.JSONDecodeError:
-        print(f"Error decoding JSON from {BLACKLISTS_FILE}. Returning default empty blacklists.")
-        # Return default structure on decode error to prevent crashes
-        return {"blacklisted_words": [], "blacklisted_links": []}
+        print(f"Error decoding JSON from {BLACKLISTS_FILE}. Returning empty dictionary for blacklists.")
+        return {}
 
 def save_blacklists(blacklists_data):
-    """Saves blacklisted words and links to blacklists.json."""
+    """Saves per-guild blacklisted words and links to blacklists.json."""
     with open(BLACKLISTS_FILE, 'w') as f:
         json.dump(blacklists_data, f, indent=4)
 
