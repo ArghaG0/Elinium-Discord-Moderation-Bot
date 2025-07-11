@@ -898,9 +898,9 @@ class Moderation(commands.Cog):
 
         words_formatted = "\n".join(f"- `{word}`" for word in words_list_for_guild)
         embed = discord.Embed(
-            title=f"<:sparkle:1256588611625160935> Blacklisted Words for {ctx.guild.name} <a:sparkle:1256588611625160935>",
+            title=f"{self.bot.EMOJIS['BUTTERFLY']} Blacklisted Words for {ctx.guild.name} {self.bot.EMOJIS['BUTTERFLY']}",
             description=words_formatted,
-            color=discord.Color.red()
+            color=0xFFB6C1
         )
         await ctx.send(embed=embed)
 
@@ -1004,9 +1004,9 @@ class Moderation(commands.Cog):
 
         links_formatted = "\n".join(f"- `{link}`" for link in links_list_for_guild)
         embed = discord.Embed(
-            title=f"<:sparkle:1256588611625160935> Blacklisted Links for {ctx.guild.name} <a:sparkle:1256588611625160935>",
+            title=f"{self.bot.EMOJIS['BUTTERFLY']} Blacklisted Links for {ctx.guild.name} {self.bot.EMOJIS['BUTTERFLY']}",
             description=links_formatted,
-            color=discord.Color.red()
+            color=0xFFB6C1
         )
         await ctx.send(embed=embed)
 
