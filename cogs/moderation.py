@@ -307,6 +307,10 @@ class Moderation(commands.Cog):
         if not await self._check_hierarchy(ctx, member, "clear warnings for"):
             return
 
+        if num_or_index == 0:
+            await ctx.send("Warning number/count cannot be 0. Use a positive warning number, a negative count for recent warnings, or omit it to clear all warnings.")
+            return
+
         guild_id = str(ctx.guild.id)
         user_id = str(member.id)
         warnings_data = load_warnings() # Load current warnings from your JSON file
@@ -804,7 +808,7 @@ class Moderation(commands.Cog):
             print(f"Error in set_modlog_channel: {error}")
 
     # --- Blacklist Management Group Commands ---
-    @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=True)
+    @commands.group(name='blacklist', aliases=['bl'], invoke_without_command=False)
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     async def blacklist_group(self, ctx):

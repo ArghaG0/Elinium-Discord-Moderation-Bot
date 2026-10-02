@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import asyncio
 import datetime
 import os # Needed for os.getenv('BOT_OWNER_ID') if you still use it in botinfo
 
@@ -34,7 +35,7 @@ class General(commands.Cog):
             try:
                 msg = await self.bot.wait_for('message', check=check, timeout=30.0)
                 message = msg.content
-            except asyncio.TimeoutError: # Import asyncio if not already
+            except asyncio.TimeoutError:
                 await ctx.send(f"{self.bot.EMOJIS['HEART']} You didn't say anything in time! {self.bot.EMOJIS['HEART']}")
                 return
 

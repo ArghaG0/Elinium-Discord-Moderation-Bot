@@ -25,6 +25,7 @@ EMOJI_FLOWER = "<:CherryBlossom:1392784047234748417>"
 EMOJI_STAR = "<a:Pinkstar:1392784692138217543>"
 EMOJI_MANYBUTTERFLIES = "<a:65954pinkbutterflies:1392780618018066512>"
 EMOJI_BUTTERFLY = "<a:95526butterflypink:1392781803093233765>"
+EMOJI_ERROR = "\u274c"
 
 # Set up intents for your bot (these are crucial for your bot's functionality)
 intents = discord.Intents.default()
@@ -49,6 +50,7 @@ bot.EMOJIS = {
     "STAR": EMOJI_STAR,
     "MANYBUTTERFLIES": EMOJI_MANYBUTTERFLIES,
     "BUTTERFLY": EMOJI_BUTTERFLY,
+    "ERROR": EMOJI_ERROR,
 }
 
 
