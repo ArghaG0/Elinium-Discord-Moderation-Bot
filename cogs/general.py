@@ -70,7 +70,7 @@ class General(commands.Cog):
         await ctx.send(embed=embed)
 
     # --- botinfo Command ---
-    @commands.command(name='botinfo')
+    @commands.command(name='botinfo', aliases=['info'])
     async def get_bot_info(self, ctx):
         """Displays information and statistics about the bot."""
 

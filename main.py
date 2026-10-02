@@ -3,11 +3,18 @@ from discord.ext import commands
 import os
 import datetime
 from dotenv import load_dotenv
+import asyncpg
+from utils import init_db
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL and DATABASE_URL.startswith("'") and DATABASE_URL.endswith("'"):
+    DATABASE_URL = DATABASE_URL[1:-1]
 BOT_OWNER_ID = os.getenv('BOT_OWNER_ID') # Ensure this is set in your .env file
+
+
 
 # Define your global emojis here. These will be accessible by all cogs via 'bot' object.
 EMOJI_CROWN = "<:26985whitecrown:1392780685592231936>"
@@ -46,6 +53,31 @@ bot.EMOJIS = {
 
 
 # --- Bot Events ---
+@bot.event
+async def setup_hook():
+    """Event that fires before the bot connects to Discord."""
+    # Initialize the database pool
+    try:
+        bot.db_pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            command_timeout=60,
+            # Serverless dbs can scale to zero, so set a longer connection timeout
+            timeout=60.0 
+        )
+        print("Database connection pool established.")
+        # Initialize schema
+        await init_db(bot.db_pool)
+        print("Database schema initialized.")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Failed to initialize database: {e}")
+        # Exit if database connection fails as it's critical
+        import sys
+        sys.exit(1)
+
 @bot.event
 async def on_ready():
     """Event that fires when the bot successfully connects to Discord."""

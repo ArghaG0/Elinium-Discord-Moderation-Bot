@@ -180,3 +180,52 @@ def parse_duration(duration_str):
         return datetime.timedelta(weeks=value)
     else:
         return None
+
+# --- Database Setup ---
+async def init_db(pool):
+    """Initializes the PostgreSQL database schema if it doesn't exist."""
+    async with pool.acquire() as conn:
+        # Create guild_settings table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS guild_settings (
+                guild_id BIGINT PRIMARY KEY,
+                modlog_channel_id BIGINT,
+                confession_channel_id BIGINT
+            )
+        ''')
+
+        # Create warnings table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS warnings (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                moderator_id BIGINT NOT NULL,
+                reason TEXT,
+                timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Add index for faster lookups
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings (guild_id, user_id)')
+
+        # Create blacklisted_words table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS blacklisted_words (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                word VARCHAR(255) NOT NULL,
+                UNIQUE (guild_id, word)
+            )
+        ''')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_blacklisted_words_guild ON blacklisted_words (guild_id)')
+
+        # Create blacklisted_links table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS blacklisted_links (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                link VARCHAR(255) NOT NULL,
+                UNIQUE (guild_id, link)
+            )
+        ''')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_blacklisted_links_guild ON blacklisted_links (guild_id)')
