@@ -8,7 +8,7 @@ Elinium is a Python Discord bot built with discord.py and cogs. It is migrating 
 
 **Start fresh in PostgreSQL. Do not import old JSON data or create an import script.** Existing JSON files remain in use until their consumers are migrated and Phase 6 removes them.
 
-`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils.py` still contains legacy JSON helpers, moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog and confession settings now use PostgreSQL. Warnings and blacklists still use JSON pending Phases 4 and 5.
+`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils.py` still contains legacy JSON helpers, moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog/confession settings and warnings now use PostgreSQL. Blacklists still use JSON pending Phase 5.
 
 ## Required workflow for every coding agent
 
@@ -19,7 +19,7 @@ Elinium is a Python Discord bot built with discord.py and cogs. It is migrating 
 5. **The project owner must verify each phase before the next begins.** Wait for the owner's confirmation before proceeding.
 6. Keep the separate bug tracker and `uv` status accurate when those tasks are addressed. Do not silently bundle unrelated fixes or dependency migration into a PostgreSQL phase.
 
-Current checkpoint: Phase 2 is verified and approved by the owner, following the live Neon helper sanity check. Phase 3 is implemented and locally verified, awaiting owner verification. Do not begin Phase 4 yet. The four earlier bug fixes remain implemented with passing regression tests; no separate live verification result for those command fixes has been supplied.
+Current checkpoint: Phases 2 and 3 are verified and approved by the owner. Phase 4 is implemented and locally verified, awaiting owner verification. Do not begin Phase 5 yet. The four earlier bug fixes remain implemented with passing regression tests; no separate live verification result for those command fixes has been supplied.
 
 ## Agreed file organization and scope
 
@@ -81,8 +81,8 @@ Primary keys and unique constraints also create their supporting indexes. There 
 | --- | --- | --- | --- |
 | 1 | DB connection pool and schema initialization | DONE | Verified working by owner; tables confirmed created in Neon |
 | 2 | Async helpers in `db/`, config validation, import-safe entry point, startup logging | DONE | Verified and approved by owner following live Neon sanity check |
-| 3 | Refactor guild settings: modlog and confession channels | IMPLEMENTED — locally verified | Awaiting owner verification |
-| 4 | Refactor warning commands | PENDING | Pending |
+| 3 | Refactor guild settings: modlog and confession channels | DONE | Verified and approved by owner |
+| 4 | Refactor warning commands | IMPLEMENTED — locally verified | Awaiting owner verification |
 | 5 | Refactor blacklist commands and AutoMod cache | PENDING | Pending |
 | 6 | Remove old JSON files and dead JSON-loading code | PENDING | Pending |
 
@@ -142,13 +142,13 @@ To reproduce the checks, set `TEST_DATABASE_URL` explicitly to a disposable Post
 uv --no-cache run --no-project --with asyncpg==0.30.0 --with discord.py==2.5.2 --with python-dotenv==1.1.1 python -B -m unittest discover -s tests -v
 ```
 
-If `TEST_DATABASE_URL` is absent, database integration tests are explicitly skipped (eight as of Phase 3); they never fall back to `.env` or `DATABASE_URL`. Use Python 3.13.5 for the verified interpreter version. On the current Windows installation, `--python` was supplied with the installed interpreter path because the `python` app alias was unavailable.
+If `TEST_DATABASE_URL` is absent, database integration tests are explicitly skipped (nine as of Phase 4); they never fall back to `.env` or `DATABASE_URL`. Use Python 3.13.5 for the verified interpreter version. On the current Windows installation, `--python` was supplied with the installed interpreter path because the `python` app alias was unavailable.
 
 Phase 2 retained all existing JSON helpers and cog behavior. The subsequent settings-consumer migration is recorded below.
 
 ### Phase 3: Refactor guild settings
 
-**Status: IMPLEMENTED; owner verification pending.**
+**Status: DONE; verified and approved by owner.**
 
 - `setmodlogchannel` now awaits `db.settings.set_modlog_channel()` with integer guild/channel IDs before reporting success.
 - `send_modlog_embed()` fetches the current PostgreSQL modlog setting on each call. A failed settings lookup is logged and returns without making a completed moderation action or confession submission appear to fail.
@@ -161,18 +161,25 @@ Verification: **35 tests passed**, including eight PostgreSQL 17 integration tes
 
 `tests/test_settings_flows.py` adds ten focused checks for absent/changed settings, settings-free cog initialization, integer ID wiring, failure responses, no false success after failed writes, missing/non-text confession channels, and best-effort modlog lookup. Existing confession-error regression coverage now supplies DB settings instead of the removed JSON state. The rest of the regression suite passes unchanged in behavior.
 
-Owner verification next: configure both channels with the bot running, issue a moderation action and a confession, restart the bot and repeat, and confirm invalid confession-channel cleanup leaves modlogs configured. Existing JSON channel settings are not imported; configure channels anew if PostgreSQL has no settings. Wait for approval before Phase 4.
+The owner subsequently verified and approved Phase 3 and authorized Phase 4. Existing JSON channel settings are not imported; configure channels anew if PostgreSQL has no settings.
 
 All moderation actions that call `send_modlog_embed()` depend on this change, even if they do not directly manage settings.
 
 ### Phase 4: Refactor warnings
 
-- Switch `warn`, `warnings`, and `clearwarnings` to DB helpers.
-- Preserve warning display order, counts, moderator attribution, reasons, and timestamps.
-- Preserve deletion modes: omitted argument clears all; positive argument selects a displayed warning number; negative argument removes the latest N.
-- Preserve the zero-count rejection added by the separate bug fix; do not reintroduce that bug in DB helpers or the command refactor.
-- Remove obsolete warning state from cog initialization when no longer needed.
-- Verify persistence, guild/user isolation, ordering, counts, and deletion modes, including invalid inputs.
+**Status: IMPLEMENTED; owner verification pending.**
+
+- `warn` uses `db.warnings.add_warning()` and `count_warnings()` with integer guild/user/moderator IDs. Persistence completes before DMs, success feedback, and modlogs. Failed inserts report an error without notifying the target. If only the subsequent count lookup fails, the command confirms the saved warning with an unavailable count instead of suggesting a duplicate retry.
+- `warnings` reads `get_warnings()` in the helper's deterministic oldest-first ID order. Display numbers remain contiguous and 1-based, distinct from database IDs. Database datetime values are rendered in UTC; nullable reasons/timestamps have fallbacks, and uncached moderators retain their ID mention.
+- `clearwarnings` delegates directly to the transactional `clear_warnings()` helper: omitted argument clears all, a positive integer selects the current displayed number, and a negative integer removes the latest N. The zero-count guard remains before database access. Out-of-range selections are rejected without deletion; clear-all on an empty history reports no warnings.
+- Success counts and modlog details come from the records returned by the atomic deletion, not a separately fetched list. Log details explicitly label database record IDs so they are not confused with command display numbers.
+- Removed warnings JSON imports and `all_warnings_data` initialization. All JSON files and the JSON load/save functions in `utils.py` remain untouched for Phase 6. Blacklist behavior and permission/hierarchy checks remain unchanged.
+
+Verification: **45 tests passed**, including nine PostgreSQL 17 integration tests, using Python 3.13.5 and the pinned dependencies through `uv`. The new command integration scenario creates warnings, recreates the pool and cog, lists persisted records, rejects zero and oversized selectors, deletes by displayed position and latest N, clears all, checks renumbering, and confirms other guilds/users are unaffected. Discord I/O was mocked; no live Discord or Neon connection was used for this phase.
+
+Nine focused warning-flow checks cover write-before-feedback ordering, denied hierarchy, closed DMs, nullable fields and UTC display, database read/write failures, count failure after a successful insert, and no false success/modlog on failed deletion. Earlier zero-count/deletion regression tests now exercise the DB-backed command contract. Prior settings and startup regression tests also pass.
+
+Owner verification next: issue and list several warnings, restart the bot, delete a displayed warning number, remove the latest N, reject zero/out-of-range selections, and clear all. Confirm DMs/modlogs and guild/user isolation as appropriate. Existing JSON warnings are not imported. Wait for owner approval before Phase 5.
 
 ### Phase 5: Refactor blacklists and AutoMod cache
 
@@ -196,7 +203,7 @@ All moderation actions that call `send_modlog_embed()` depend on this change, ev
 
 | Storage | Current consumers |
 | --- | --- |
-| `warnings.json` | `warn`, `warnings`, `clearwarnings` load on invocation; mutations save. Cog initialization also loads an otherwise unused `all_warnings_data`. |
+| `warnings.json` | No active consumers after Phase 4. File and JSON helpers retained untouched until Phase 6. |
 | `modlog_settings.json` | No active consumers after Phase 3. File and JSON helpers retained untouched until Phase 6. |
 | `blacklists.json` | Cog initialization loads `all_blacklists_data`; mutations update/save it; list commands and AutoMod read the dictionary. |
 | `confession_channels.json` | No active consumers after Phase 3. File and JSON helpers retained untouched until Phase 6. |
@@ -220,7 +227,7 @@ Regression verification: `tests/test_review_fixes.py` contains six passing offli
 
 ## Migration and hosting considerations
 
-- PostgreSQL is required for startup and now backs modlog/confession settings. Warnings and blacklist persistence remain JSON-based until their phases.
+- PostgreSQL is required for startup and now backs modlog/confession settings and warnings. Blacklist persistence remains JSON-based until Phase 5.
 - There is no explicit database pool shutdown handling yet. Missing/invalid startup configuration, including `DATABASE_URL`, is now validated in `config.py`.
 - JSON operations remain synchronous and overwrite whole files; invalid JSON is treated as empty data and may be overwritten by later saves.
 - The README currently documents `BOT_TOKEN` and environment-provided emojis, whereas the code reads `DISCORD_TOKEN` and uses hardcoded emojis. It also describes pip and JSON storage.
@@ -242,3 +249,4 @@ Use `uv` for dependency management going forward. The dependency migration must 
 | 2026-10-02 | Implemented revised Phase 2: `db/` helpers, configuration validation, import-safe entry point, and startup logging. | All 24 tests passed, including seven isolated PostgreSQL 17 integration tests. Awaiting owner verification; Phase 3 has not started. |
 | 2026-10-02 | Ran an owner-requested one-off sanity check against the real Neon URL in `.env`. | Every public DB helper passed; committed rows, guild isolation, removals, and pool round trips verified. Temporary rows and script removed. Cold-start suspension unconfirmed; owner sign-off still pending. |
 | 2026-10-02 | Owner verified and approved Phase 2. Implemented Phase 3 modlog/confession settings consumers and removed obsolete cog settings state. | All 35 tests passed, including eight isolated PostgreSQL integration tests. JSON helper bodies unchanged; test container removed. Phase 3 awaits owner verification; Phase 4 has not started. |
+| 2026-10-02 | Owner verified and approved Phase 3. Implemented Phase 4 warning commands and removed obsolete cog warnings state. | All 45 tests passed, including nine isolated PostgreSQL integration tests. JSON helpers/files retained. Phase 4 awaits owner verification; Phase 5 has not started. |

@@ -9,10 +9,10 @@ from discord import app_commands
 import json # Ensure json is imported for loading/saving data
 import logging
 from db import settings as db_settings
+from db import warnings as db_warnings
 
 # Import your helper functions from utils.py
 from utils import (
-    load_warnings, save_warnings,
     send_modlog_embed, parse_duration,
     load_blacklists, save_blacklists,
 )
@@ -24,10 +24,6 @@ class Moderation(commands.Cog):
         self.bot = bot
         # You can keep track of muted users if needed, though Discord's timeout handles most of it
         self.muted_users = {}
-
-        # Load all warnings data
-        self.all_warnings_data = load_warnings()
-        print("Loaded all warnings data")
 
         # Load dynamic blacklists
         self.all_blacklists_data = load_blacklists()
@@ -177,23 +173,18 @@ class Moderation(commands.Cog):
         if not await self._check_hierarchy(ctx, member, "warn"):
             return
 
-        warnings = load_warnings()
-        guild_id = str(ctx.guild.id)
-        user_id = str(member.id)
-
-        if guild_id not in warnings:
-            warnings[guild_id] = {}
-        if user_id not in warnings[guild_id]:
-            warnings[guild_id][user_id] = []
-
-        warnings[guild_id][user_id].append({
-            'reason': reason,
-            'moderator_id': ctx.author.id,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
-        save_warnings(warnings)
-
-        warning_count = len(warnings[guild_id][user_id])
+        try:
+            await db_warnings.add_warning(self.bot.db_pool, ctx.guild.id, member.id, ctx.author.id, reason)
+        except Exception:
+            log.exception("Failed to save warning for guild %s user %s", ctx.guild.id, member.id)
+            await ctx.send("I couldn't save the warning. Please try again later.")
+            return
+        try:
+            warning_count = await db_warnings.count_warnings(self.bot.db_pool, ctx.guild.id, member.id)
+        except Exception:
+            # The insert has committed: do not suggest retrying the warning.
+            log.exception("Warning saved, but count lookup failed for guild %s user %s", ctx.guild.id, member.id)
+            warning_count = "unavailable"
 
         # Try to DM the user
         try:
@@ -244,15 +235,17 @@ class Moderation(commands.Cog):
     async def show_warnings(self, ctx, member: discord.Member):
         """Displays a member's warnings. Usage: eli warnings <@user>
         Requires 'Moderate Members' permission."""
-        warnings = load_warnings()
-        guild_id = str(ctx.guild.id)
-        user_id = str(member.id)
+        try:
+            user_warnings = await db_warnings.get_warnings(self.bot.db_pool, ctx.guild.id, member.id)
+        except Exception:
+            log.exception("Failed to read warnings for guild %s user %s", ctx.guild.id, member.id)
+            await ctx.send("I couldn't load the warnings. Please try again later.")
+            return
 
-        if guild_id not in warnings or user_id not in warnings[guild_id] or not warnings[guild_id][user_id]:
+        if not user_warnings:
             await ctx.send(f"{member.mention} has no warnings in this server.")
             return
 
-        user_warnings = warnings[guild_id][user_id]
         embed = discord.Embed(
             title=f"{self.bot.EMOJIS['STAR']} Warnings for {member.display_name} {self.bot.EMOJIS['STAR']}",
             color=0xFFB6C1,
@@ -262,15 +255,15 @@ class Moderation(commands.Cog):
         embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
 
         for i, warning in enumerate(user_warnings):
-            moderator = self.bot.get_user(warning['moderator_id'])
-            mod_name = moderator.mention if moderator else "Unknown User"
-            timestamp = datetime.fromisoformat(warning['timestamp'])
+            moderator = self.bot.get_user(warning.moderator_id)
+            mod_name = moderator.mention if moderator else f"<@{warning.moderator_id}>"
+            timestamp = warning.timestamp.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC') if warning.timestamp else "Unknown"
             embed.add_field(
                 name=f"Warning #{i+1}",
                 value=(
-                    f"{self.bot.EMOJIS['SPARKLE']} **Reason:** {warning['reason']}\n"
+                    f"{self.bot.EMOJIS['SPARKLE']} **Reason:** {warning.reason or 'No reason provided.'}\n"
                     f"{self.bot.EMOJIS['RIBBON']} **Moderator:** {mod_name}\n"
-                    f"{self.bot.EMOJIS['FLOWER']} **Date:** {timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                    f"{self.bot.EMOJIS['FLOWER']} **Date:** {timestamp}"
                 ),
                 inline=False
             )
@@ -305,75 +298,37 @@ class Moderation(commands.Cog):
             await ctx.send("Warning number/count cannot be 0. Use a positive warning number, a negative count for recent warnings, or omit it to clear all warnings.")
             return
 
-        guild_id = str(ctx.guild.id)
-        user_id = str(member.id)
-        warnings_data = load_warnings() # Load current warnings from your JSON file
+        try:
+            removed_warnings = await db_warnings.clear_warnings(
+                self.bot.db_pool, ctx.guild.id, member.id, num_or_index,
+            )
+        except IndexError:
+            await ctx.send("That warning number or count exceeds the current history. Use `eli warnings` to check the member's current warnings.")
+            return
+        except Exception:
+            log.exception("Failed to clear warnings for guild %s user %s", ctx.guild.id, member.id)
+            await ctx.send("I couldn't clear the warnings. Please try again later.")
+            return
 
-        if guild_id not in warnings_data or user_id not in warnings_data[guild_id] or not warnings_data[guild_id][user_id]:
+        if not removed_warnings:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} {member.display_name} has no warnings to clear in this server. {self.bot.EMOJIS['SPARKLE']}")
             return
 
-        # Get a direct reference to the user's warnings list within the main data structure
-        current_user_warnings_list = warnings_data[guild_id][user_id]
-        warnings_count = len(current_user_warnings_list)
-
-        action_feedback_msg = ""
-        modlog_details_list = []
-
+        removed_count = len(removed_warnings)
         if num_or_index is None:
-            # Scenario 1: Clear all warnings
-            action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully cleared all {warnings_count} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
-
-            modlog_details_list.append(f"Cleared all {warnings_count} warnings.")
-            for i, warning in enumerate(current_user_warnings_list):
-                modlog_details_list.append(f"  - Warning #{i+1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
-
-            del warnings_data[guild_id][user_id] # This directly modifies warnings_data
-
+            action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully cleared all {removed_count} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
         elif num_or_index > 0:
-            # Scenario 2: Remove a specific warning by its 1-based index
-            warning_index_to_remove = num_or_index - 1 # Convert to 0-based list index
-
-            if not (0 <= warning_index_to_remove < warnings_count):
-                await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Invalid warning number. {member.display_name} has {warnings_count} warnings. Please provide a number between 1 and {warnings_count}. {self.bot.EMOJIS['SPARKLE']}")
-                return
-
-            removed_warning = current_user_warnings_list.pop(warning_index_to_remove) # .pop() modifies the list in place
             action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully removed warning #{num_or_index} for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
+        else:
+            action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully removed the last {removed_count} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
 
-            modlog_details_list.append(f"Removed specific warning #{num_or_index}.")
-            modlog_details_list.append(f"  - Reason: '{removed_warning['reason']}'")
-            modlog_details_list.append(f"  - Moderator: <@{removed_warning['moderator_id']}>")
-            modlog_details_list.append(f"  - Timestamp: {removed_warning['timestamp']}")
-
-        else: # num_or_index < 0
-            # Scenario 3: Remove the last 'count' warnings
-            count_to_remove = abs(num_or_index) # Use absolute value for count
-
-            if count_to_remove > warnings_count:
-                await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Cannot remove {count_to_remove} warnings, {member.display_name} only has {warnings_count}. {self.bot.EMOJIS['SPARKLE']}")
-                return
-
-            removed_warnings = current_user_warnings_list[-count_to_remove:] # Get the warnings that will be removed for logging
-
-            warnings_data[guild_id][user_id] = current_user_warnings_list[:-count_to_remove]
-
-            action_feedback_msg = f"{self.bot.EMOJIS['HEART']} Successfully removed the last {count_to_remove} warnings for **{member.display_name}**. {self.bot.EMOJIS['HEART']}"
-
-            modlog_details_list.append(f"Removed the last {count_to_remove} warnings.")
-            for i, warning in enumerate(removed_warnings):
-                modlog_details_list.append(f"  - Warning #{warnings_count - count_to_remove + i + 1} (Mod: <@{warning['moderator_id']}>, Reason: '{warning['reason']}')")
-
-        # After modification, check if the user's warning list for the guild became empty
-        if guild_id in warnings_data and not warnings_data[guild_id].get(user_id):
-            if user_id in warnings_data[guild_id]: # Ensure the key exists before deleting
-                del warnings_data[guild_id][user_id] # If empty, remove the user's entry
-
-        # If the guild has no more warning entries, delete its entry to keep JSON clean
-        if guild_id in warnings_data and not warnings_data[guild_id]:
-            del warnings_data[guild_id]
-
-        save_warnings(warnings_data) # Save the updated warnings data
+        # Log records returned by the atomic deletion, not an earlier snapshot.
+        # Database IDs are explicitly labeled; command arguments remain display numbers.
+        modlog_details_list = [
+            f" - Record ID {warning.id} (Mod: <@{warning.moderator_id}>, "
+            f"Reason: '{warning.reason or 'No reason provided.'}', Timestamp: {warning.timestamp})"
+            for warning in removed_warnings
+        ]
 
         # Send confirmation message to the channel
         await ctx.send(action_feedback_msg)

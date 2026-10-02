@@ -137,6 +137,47 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await warnings.get_warnings(self.pool, 2, 10), [other])
         self.assertEqual(await warnings.get_warnings(self.pool, 1, 11), [])
 
+    async def test_warning_commands_persist_and_preserve_all_deletion_modes(self):
+        from unittest.mock import patch
+        from test_warning_flows import warning_cog, warning_context
+
+        cog = warning_cog(self.pool)
+        ctx, member = warning_context()
+        with patch("utils.load_warnings", side_effect=AssertionError("Legacy JSON")), \
+                patch("utils.save_warnings", side_effect=AssertionError("Legacy JSON")), \
+                patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock) as modlog, \
+                patch("builtins.print"):
+            for reason in ("first", "second", "third", "fourth"):
+                await cog.warn_user.callback(cog, ctx, member, reason=reason)
+            self.assertEqual(await warnings.count_warnings(self.pool, 1, 20), 4)
+            other_guild = await warnings.add_warning(self.pool, 2, 20, 10, "other guild")
+            other_user = await warnings.add_warning(self.pool, 1, 21, 10, "other user")
+            async with asyncpg.create_pool(
+                os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2,
+                server_settings={"search_path": self.schema},
+            ) as restarted_pool:
+                restarted = warning_cog(restarted_pool)
+                await restarted.show_warnings.callback(restarted, ctx, member)
+                self.assertEqual([f.name for f in ctx.send.call_args.kwargs["embed"].fields],
+                                 ["Warning #1", "Warning #2", "Warning #3", "Warning #4"])
+                for invalid in (0, 5, -5):
+                    await restarted.clearwarnings.callback(restarted, ctx, member, invalid)
+                    self.assertEqual(await warnings.count_warnings(restarted_pool, 1, 20), 4)
+                await restarted.clearwarnings.callback(restarted, ctx, member, 2)
+                self.assertIn("second", modlog.call_args.args[5])
+                await restarted.show_warnings.callback(restarted, ctx, member)
+                fields = ctx.send.call_args.kwargs["embed"].fields
+                self.assertEqual(fields[1].name, "Warning #2")
+                self.assertIn("third", fields[1].value)
+                await restarted.clearwarnings.callback(restarted, ctx, member, -2)
+                self.assertEqual([r.reason for r in await warnings.get_warnings(restarted_pool, 1, 20)], ["first"])
+                await restarted.clearwarnings.callback(restarted, ctx, member)
+                self.assertEqual(await warnings.get_warnings(restarted_pool, 1, 20), [])
+                await restarted.show_warnings.callback(restarted, ctx, member)
+                self.assertIn("no warnings", ctx.send.call_args.args[0])
+                self.assertEqual(await warnings.get_warnings(restarted_pool, 2, 20), [other_guild])
+                self.assertEqual(await warnings.get_warnings(restarted_pool, 1, 21), [other_user])
+
     async def test_warning_clear_modes_and_invalid_ranges(self):
         rows = [await warnings.add_warning(self.pool, 1, 10, 99, str(i)) for i in range(5)]
         unaffected = await warnings.add_warning(self.pool, 1, 11, 99, "other user")

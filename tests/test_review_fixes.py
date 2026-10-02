@@ -4,7 +4,6 @@ Run with: python -B -m unittest discover -s tests -v
 """
 
 import ast
-import copy
 import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +17,7 @@ from discord.ext.commands.view import StringView
 from cogs.general import General
 from cogs.moderation import Moderation
 from db.settings import GuildSettings
+from db.warnings import Warning
 
 
 def configured_emojis():
@@ -47,7 +47,7 @@ class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
         self.bot.db_pool = AsyncMock()
         with patch.multiple(
             "cogs.moderation",
-            load_warnings=lambda: {}, load_blacklists=lambda: {},
+            load_blacklists=lambda: {},
         ):
             self.cog = Moderation(self.bot)
         await self.bot.add_cog(self.cog)
@@ -100,35 +100,31 @@ class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
         ctx = self.context()
         with (
             patch.object(self.cog, "_check_hierarchy", new=AsyncMock(return_value=True)),
-            patch("cogs.moderation.load_warnings") as load,
-            patch("cogs.moderation.save_warnings") as save,
+            patch("cogs.moderation.db_warnings.clear_warnings", new_callable=AsyncMock) as clear,
             patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock) as log,
         ):
             await self.cog.clearwarnings.callback(self.cog, ctx, SimpleNamespace(id=30), 0)
-            load.assert_not_called()
-            save.assert_not_called()
+            clear.assert_not_awaited()
             log.assert_not_awaited()
             self.assertIn("cannot be 0", ctx.send.call_args.args[0])
 
     async def test_clearwarnings_existing_deletion_modes(self):
-        records = [
-            {"reason": reason, "moderator_id": 10, "timestamp": "2026-10-02T00:00:00+00:00"}
-            for reason in ("first", "second", "third")
-        ]
-        for argument, remaining in ((None, []), (2, ["first", "third"]), (-2, ["first"])):
+        records = [Warning(i, 20, 30, 10, reason, datetime.datetime.now(datetime.timezone.utc))
+                   for i, reason in enumerate(("first", "second", "third"), 100)]
+        for argument, removed in ((None, records), (2, [records[1]]), (-2, records[1:])):
             with self.subTest(argument=argument):
-                data = {"20": {"30": copy.deepcopy(records)}}
                 ctx = self.context()
                 with (
                     patch.object(self.cog, "_check_hierarchy", new=AsyncMock(return_value=True)),
-                    patch("cogs.moderation.load_warnings", return_value=data),
-                    patch("cogs.moderation.save_warnings") as save,
-                    patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock),
+                    patch("cogs.moderation.db_warnings.clear_warnings", new=AsyncMock(return_value=removed)) as clear,
+                    patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock) as modlog,
                 ):
                     member = SimpleNamespace(id=30, display_name="Member")
                     await self.cog.clearwarnings.callback(self.cog, ctx, member, argument)
-                    saved = save.call_args.args[0].get("20", {}).get("30", [])
-                    self.assertEqual([warning["reason"] for warning in saved], remaining)
+                    clear.assert_awaited_once_with(self.bot.db_pool, 20, 30, argument)
+                    details = modlog.call_args.args[5]
+                    for warning in removed:
+                        self.assertIn(f"Record ID {warning.id}", details)
 
     async def test_say_timeout_sends_feedback(self):
         ctx = self.context()
