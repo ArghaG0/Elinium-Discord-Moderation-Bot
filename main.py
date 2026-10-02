@@ -2,20 +2,12 @@ import discord
 from discord.ext import commands
 import os
 import datetime
-from dotenv import load_dotenv
+import logging
 import asyncpg
+from config import ConfigError, load_config
 from utils import init_db
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
-DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL and DATABASE_URL.startswith("'") and DATABASE_URL.endswith("'"):
-    DATABASE_URL = DATABASE_URL[1:-1]
-BOT_OWNER_ID = os.getenv('BOT_OWNER_ID') # Ensure this is set in your .env file
-
-
-
+log = logging.getLogger(__name__)
 # Define your global emojis here. These will be accessible by all cogs via 'bot' object.
 EMOJI_CROWN = "<:26985whitecrown:1392780685592231936>"
 EMOJI_HEART = "<:32562pinkheart:1392780764835217408>"
@@ -61,21 +53,19 @@ async def setup_hook():
     # Initialize the database pool
     try:
         bot.db_pool = await asyncpg.create_pool(
-            DATABASE_URL,
+            bot.config.database_url,
             min_size=1,
             max_size=10,
             command_timeout=60,
             # Serverless dbs can scale to zero, so set a longer connection timeout
             timeout=60.0 
         )
-        print("Database connection pool established.")
+        log.info("Database connection pool established.")
         # Initialize schema
         await init_db(bot.db_pool)
-        print("Database schema initialized.")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"Failed to initialize database: {e}")
+        log.info("Database schema initialized.")
+    except Exception:
+        log.exception("Failed to initialize database.")
         # Exit if database connection fails as it's critical
         import sys
         sys.exit(1)
@@ -83,7 +73,7 @@ async def setup_hook():
 @bot.event
 async def on_ready():
     """Event that fires when the bot successfully connects to Discord."""
-    print(f'{bot.user} has connected to Discord!')
+    log.info("%s has connected to Discord!", bot.user)
     
     # Load all Cogs when the bot is ready
     await load_extensions()
@@ -93,9 +83,9 @@ async def on_ready():
         # For immediate testing, syncing to a specific guild ID is faster:
         # await bot.tree.sync(guild=discord.Object(id=YOUR_TEST_GUILD_ID))
         await bot.tree.sync()
-        print("Slash commands synced!")
-    except Exception as e:
-        print(f"Failed to sync slash commands: {e}")
+        log.info("Slash commands synced!")
+    except Exception:
+        log.exception("Failed to sync slash commands.")
 
     # Set bot's activity/presence (optional)
     # await bot.change_presence(activity=discord.Game(name="with Python"))
@@ -107,14 +97,14 @@ async def load_extensions():
         if filename.endswith('.py'):
             try:
                 await bot.load_extension(f'cogs.{filename[:-3]}') # Load as 'cogs.filename'
-                print(f"Loaded extension: {filename}")
+                log.info("Loaded extension: %s", filename)
             except commands.ExtensionAlreadyLoaded:
-                print(f"Extension already loaded: {filename}")
-            except commands.ExtensionFailed as e:
-                print(f"Failed to load extension {filename}: {e.original}")
-            except Exception as e:
-                print(f"An error occurred loading extension {filename}: {e}")
-    print("All extensions loaded!")
+                log.info("Extension already loaded: %s", filename)
+            except commands.ExtensionFailed:
+                log.exception("Failed to load extension: %s", filename)
+            except Exception:
+                log.exception("An error occurred loading extension: %s", filename)
+    log.info("Extension loading finished.")
 
 
 # --- Help Command (This will display your commands) ---
@@ -186,5 +176,26 @@ async def badgecheck(interaction: discord.Interaction):
     await interaction.response.send_message("Running a slash command for the Active Developer Badge!")
 
 
-# Run the bot with your token
-bot.run(TOKEN)
+def setup_logging(level: int = logging.INFO) -> None:
+    """Configure console logs once for the application and discord.py."""
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
+def main() -> None:
+    """Validate configuration before opening any Discord or database connection."""
+    setup_logging()
+    try:
+        config = load_config()
+    except ConfigError as error:
+        log.error("Configuration error: %s", error)
+        raise SystemExit(1) from None
+    logging.getLogger().setLevel(config.log_level)
+    bot.config = config
+    bot.run(config.discord_token, log_handler=None)
+
+
+if __name__ == "__main__":
+    main()

@@ -17,6 +17,7 @@ from discord.ext.commands.view import StringView
 
 from cogs.general import General
 from cogs.moderation import Moderation
+from db.settings import GuildSettings
 
 
 def configured_emojis():
@@ -43,10 +44,10 @@ class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot = commands.Bot(command_prefix="eli ", intents=discord.Intents.none())
         self.bot.EMOJIS = configured_emojis()
+        self.bot.db_pool = AsyncMock()
         with patch.multiple(
             "cogs.moderation",
-            load_warnings=lambda: {}, load_modlog_settings=lambda: {},
-            load_blacklists=lambda: {}, load_confession_channels=lambda: {},
+            load_warnings=lambda: {}, load_blacklists=lambda: {},
         ):
             self.cog = Moderation(self.bot)
         await self.bot.add_cog(self.cog)
@@ -152,8 +153,8 @@ class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
                     response=SimpleNamespace(defer=AsyncMock()),
                     followup=SimpleNamespace(send=AsyncMock()),
                 )
-                self.cog.confession_channels_data = {"20": 40}
-                await self.cog.confess.callback(self.cog, interaction, "Test message")
+                with patch("cogs.moderation.db_settings.get_settings", new=AsyncMock(return_value=GuildSettings(20, None, 40))):
+                    await self.cog.confess.callback(self.cog, interaction, "Test message")
                 interaction.followup.send.assert_awaited_once()
                 self.assertIn(self.bot.EMOJIS["ERROR"], interaction.followup.send.call_args.args[0])
                 self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])

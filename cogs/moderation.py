@@ -7,15 +7,17 @@ from datetime import datetime, timezone # Import datetime and timezone specifica
 from typing import Optional
 from discord import app_commands
 import json # Ensure json is imported for loading/saving data
+import logging
+from db import settings as db_settings
 
 # Import your helper functions from utils.py
 from utils import (
     load_warnings, save_warnings,
-    load_modlog_settings, save_modlog_settings,
     send_modlog_embed, parse_duration,
     load_blacklists, save_blacklists,
-    load_confession_channels, save_confession_channels # Added for confession commands
 )
+
+log = logging.getLogger(__name__)
 
 class Moderation(commands.Cog):
     def __init__(self, bot):
@@ -27,17 +29,9 @@ class Moderation(commands.Cog):
         self.all_warnings_data = load_warnings()
         print("Loaded all warnings data")
 
-        # Load modlog settings (if used)
-        self.all_modlog_settings = load_modlog_settings()
-        print("Loaded all modlog settings")
-
         # Load dynamic blacklists
         self.all_blacklists_data = load_blacklists()
         print("Loaded all blacklists data")
-
-        # Load confession channel data (NEW)
-        self.confession_channels_data = load_confession_channels()
-        print("Loaded confession channels data")
 
     # --- Helper Method: Hierarchy Check ---
     async def _check_hierarchy(self, ctx, member, action_name):
@@ -784,9 +778,7 @@ class Moderation(commands.Cog):
     async def set_modlog_channel(self, ctx, channel: discord.TextChannel):
         """Sets the channel for moderation logs. Usage: eli setmodlogchannel #channel-name
         Requires 'Manage Server' permission."""
-        modlog_settings = load_modlog_settings()
-        modlog_settings[str(ctx.guild.id)] = str(channel.id)
-        save_modlog_settings(modlog_settings)
+        await db_settings.set_modlog_channel(self.bot.db_pool, ctx.guild.id, channel.id)
 
         embed = discord.Embed(
             title=f"{self.bot.EMOJIS['RIBBON']} Modlog Channel Set! {self.bot.EMOJIS['RIBBON']}",
@@ -1083,9 +1075,12 @@ class Moderation(commands.Cog):
     async def set_confession_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         await interaction.response.defer(ephemeral=True)
 
-        guild_id = str(interaction.guild.id)
-        self.confession_channels_data[guild_id] = channel.id
-        save_confession_channels(self.confession_channels_data)
+        try:
+            await db_settings.set_confession_channel(self.bot.db_pool, interaction.guild.id, channel.id)
+        except Exception:
+            log.exception("Failed to save confession channel for guild %s", interaction.guild.id)
+            await interaction.followup.send("I couldn't save the confession channel. Please try again later.", ephemeral=True)
+            return
 
         await interaction.followup.send(
             f"{self.bot.EMOJIS['HEART']} Confessions channel set to {channel.mention} for this server. {self.bot.EMOJIS['HEART']}"
@@ -1106,8 +1101,14 @@ class Moderation(commands.Cog):
     async def confess(self, interaction: discord.Interaction, message: str):
         await interaction.response.defer(ephemeral=True)
 
-        guild_id = str(interaction.guild.id)
-        confession_channel_id = self.confession_channels_data.get(guild_id)
+        guild_id = interaction.guild.id
+        try:
+            settings = await db_settings.get_settings(self.bot.db_pool, guild_id)
+        except Exception:
+            log.exception("Failed to load confession settings for guild %s", guild_id)
+            await interaction.followup.send("I couldn't load the confession settings. Please try again later.", ephemeral=True)
+            return
+        confession_channel_id = settings.confession_channel_id
 
         if not confession_channel_id:
             return await interaction.followup.send(
@@ -1119,8 +1120,12 @@ class Moderation(commands.Cog):
         confession_channel = interaction.guild.get_channel(confession_channel_id)
         if not confession_channel or not isinstance(confession_channel, discord.TextChannel):
             # If the channel is gone or not a text channel, remove it from settings
-            del self.confession_channels_data[guild_id]
-            save_confession_channels(self.confession_channels_data)
+            try:
+                await db_settings.set_confession_channel(self.bot.db_pool, guild_id, None)
+            except Exception:
+                log.exception("Failed to clear invalid confession channel for guild %s", guild_id)
+                await interaction.followup.send("I couldn't update the confession settings. Please try again later.", ephemeral=True)
+                return
             return await interaction.followup.send(
                 f"{self.bot.EMOJIS['SPARKLE']} The configured confession channel no longer exists or is not a text channel. "
                 f"Please set a new one using `/setconfessionchannel`. {self.bot.EMOJIS['SPARKLE']}",

@@ -2,6 +2,10 @@ import json
 import discord
 import datetime
 import re # For parse_duration
+import logging
+from db import settings as db_settings
+
+log = logging.getLogger(__name__)
 
 # --- Helper Functions for Warnings ---
 WARNINGS_FILE = 'warnings.json'
@@ -85,13 +89,19 @@ def save_modlog_settings(settings_data):
 # --- Modlog Embed Function ---
 async def send_modlog_embed(bot, guild, action_type, member, moderator, reason, duration=None, warning_count=None, purge_count=None):
     """Sends a moderation log embed to the configured modlog channel."""
-    modlog_settings = load_modlog_settings()
-    modlog_channel_id = modlog_settings.get(str(guild.id))
+    try:
+        settings = await db_settings.get_settings(bot.db_pool, guild.id)
+    except Exception:
+        # Logging is secondary: a lookup failure must not undo/report failure of
+        # an already completed moderation action or confession submission.
+        log.exception("Failed to load modlog settings for guild %s", guild.id)
+        return
+    modlog_channel_id = settings.modlog_channel_id
 
     if not modlog_channel_id:
         return # No modlog channel set for this guild
 
-    modlog_channel = guild.get_channel(int(modlog_channel_id))
+    modlog_channel = guild.get_channel(modlog_channel_id)
 
     if not modlog_channel:
         print(f"Modlog channel (ID: {modlog_channel_id}) not found in guild {guild.name}.")

@@ -5,6 +5,7 @@ __pycache__/
 
 # Environment files (VERY IMPORTANT!)
 .env
+.venv/
 venv/
 env/
 warnings.json
@@ -13,5 +14,7 @@ blacklists.json
 confession_channels.json
 
 # Operating System specific
-.DS_Store # macOS
-Thumbs.db # Windows
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
