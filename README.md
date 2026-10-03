@@ -48,16 +48,16 @@ Other features include moderation actions, user/server information, and utility 
 ## Project layout
 
 - `main.py`: entry point, pool startup, extension loading, bot-level commands.
-- `config.py`: validated environment configuration.
+- `config/config.py`: validated environment configuration.
 - `cogs/`: general and moderation commands/listeners.
 - `db/`: settings, warnings, and blacklist data access.
 - `utils.py`: schema initialization, modlog embeds, duration parsing.
-- `tests/`: regression and opt-in PostgreSQL integration tests.
+- `tests/`: local regression and opt-in PostgreSQL integration tests (ignored by Git; not included in fresh clones).
 - `docs/MIGRATION_PLAN.md`: migration decisions, verification history, deferred work.
 
 ## Verification
 
-Run the regression suite through the same dependency environment:
+If the local `tests/` folder is present, run the regression suite through the same dependency environment. Tests are retained locally but no longer tracked by Git:
 
 ```sh
 uv run --no-project --python 3.13.5 --with-requirements requirements.txt python -B -m unittest discover -s tests -v

@@ -4,7 +4,7 @@ import os
 import datetime
 import logging
 import asyncpg
-from config import ConfigError, load_config
+from config.config import ConfigError, load_config
 from utils import init_db
 
 log = logging.getLogger(__name__)

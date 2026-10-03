@@ -28,7 +28,7 @@ def load_config(environ: Mapping[str, str] | None = None) -> Config:
     An explicit mapping bypasses dotenv and process environment access for tests.
     """
     if environ is None:
-        load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
         environ = os.environ
 
     token = environ.get("DISCORD_TOKEN", "").strip()

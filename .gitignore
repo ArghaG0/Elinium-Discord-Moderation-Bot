@@ -14,3 +14,6 @@ env/
 .DS_Store
 # Windows
 Thumbs.db
+
+# Local test suite
+tests/
