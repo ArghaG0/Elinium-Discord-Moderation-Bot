@@ -1,14 +1,14 @@
 # Elinium migration plan
 
-Last updated: 2026-10-02.
+Last updated: 2026-10-03.
 
 ## Context
 
 Elinium is a Python Discord bot built with discord.py and cogs. It is migrating from local JSON storage to PostgreSQL hosted on Neon (serverless), with the eventual goal of reliable 24/7 hosting. Dependency management will also move to `uv`.
 
-**Start fresh in PostgreSQL. Do not import old JSON data or create an import script.** Existing JSON files remain in use until their consumers are migrated and Phase 6 removes them.
+**Start fresh in PostgreSQL. Do not import old JSON data or create an import script.** All storage consumers have now migrated; existing JSON files and their unused helpers remain until Phase 6 removes them.
 
-`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils.py` still contains legacy JSON helpers, moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog/confession settings and warnings now use PostgreSQL. Blacklists still use JSON pending Phase 5.
+`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils.py` still contains legacy JSON helpers, moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog/confession settings, warnings, and blacklists now use PostgreSQL. AutoMod checks a PostgreSQL-backed in-memory blacklist cache.
 
 ## Required workflow for every coding agent
 
@@ -19,11 +19,11 @@ Elinium is a Python Discord bot built with discord.py and cogs. It is migrating 
 5. **The project owner must verify each phase before the next begins.** Wait for the owner's confirmation before proceeding.
 6. Keep the separate bug tracker and `uv` status accurate when those tasks are addressed. Do not silently bundle unrelated fixes or dependency migration into a PostgreSQL phase.
 
-Current checkpoint: Phases 2 and 3 are verified and approved by the owner. Phase 4 is implemented and locally verified, awaiting owner verification. Do not begin Phase 5 yet. The four earlier bug fixes remain implemented with passing regression tests; no separate live verification result for those command fixes has been supplied.
+Current checkpoint: Phases 2, 3, and 4 are verified and approved by the owner. Phase 5 is implemented and locally verified, awaiting owner verification. Do not begin Phase 6 yet. The four earlier bug fixes remain implemented with passing regression tests; no separate live verification result for those command fixes has been supplied.
 
 ## Agreed file organization and scope
 
-- Keep `main.py`, `utils.py`, `README.md`, and this plan at the root. Keep the two existing cogs and their command organization unchanged during this phase.
+- Keep `main.py`, `utils.py`, and `README.md` at the root. The plan now resides at `docs/MIGRATION_PLAN.md`; retain that existing location. Keep the two existing cogs and their command organization unchanged during this phase.
 - Database access lives in `db/settings.py`, `db/warnings.py`, and `db/blacklists.py`, with `db/__init__.py` identifying the package. This supersedes the original proposal to add Phase 2 helpers to `utils.py`.
 - Validated deployment configuration lives in root-level `config.py`; `.env.example` contains placeholders only. Loading `.env` happens at explicit startup, not import time.
 - Keep automated checks in `tests/`. Additional documentation and maintained one-off tools may later go in `docs/` and `scripts/`, but do not create empty folders.
@@ -82,8 +82,8 @@ Primary keys and unique constraints also create their supporting indexes. There 
 | 1 | DB connection pool and schema initialization | DONE | Verified working by owner; tables confirmed created in Neon |
 | 2 | Async helpers in `db/`, config validation, import-safe entry point, startup logging | DONE | Verified and approved by owner following live Neon sanity check |
 | 3 | Refactor guild settings: modlog and confession channels | DONE | Verified and approved by owner |
-| 4 | Refactor warning commands | IMPLEMENTED — locally verified | Awaiting owner verification |
-| 5 | Refactor blacklist commands and AutoMod cache | PENDING | Pending |
+| 4 | Refactor warning commands | DONE | Verified and approved by owner |
+| 5 | Refactor blacklist commands and AutoMod cache | IMPLEMENTED — locally verified | Awaiting owner verification |
 | 6 | Remove old JSON files and dead JSON-loading code | PENDING | Pending |
 
 ### Phase 1: DB connection pool and schema initialization
@@ -142,7 +142,7 @@ To reproduce the checks, set `TEST_DATABASE_URL` explicitly to a disposable Post
 uv --no-cache run --no-project --with asyncpg==0.30.0 --with discord.py==2.5.2 --with python-dotenv==1.1.1 python -B -m unittest discover -s tests -v
 ```
 
-If `TEST_DATABASE_URL` is absent, database integration tests are explicitly skipped (nine as of Phase 4); they never fall back to `.env` or `DATABASE_URL`. Use Python 3.13.5 for the verified interpreter version. On the current Windows installation, `--python` was supplied with the installed interpreter path because the `python` app alias was unavailable.
+If `TEST_DATABASE_URL` is absent, database integration tests are explicitly skipped (eleven as of Phase 5); they never fall back to `.env` or `DATABASE_URL`. Use Python 3.13.5 for the verified interpreter version. On the current Windows installation, `--python` was supplied with the installed interpreter path because the `python` app alias was unavailable.
 
 Phase 2 retained all existing JSON helpers and cog behavior. The subsequent settings-consumer migration is recorded below.
 
@@ -167,7 +167,7 @@ All moderation actions that call `send_modlog_embed()` depend on this change, ev
 
 ### Phase 4: Refactor warnings
 
-**Status: IMPLEMENTED; owner verification pending.**
+**Status: DONE; verified and approved by owner.**
 
 - `warn` uses `db.warnings.add_warning()` and `count_warnings()` with integer guild/user/moderator IDs. Persistence completes before DMs, success feedback, and modlogs. Failed inserts report an error without notifying the target. If only the subsequent count lookup fails, the command confirms the saved warning with an unavailable count instead of suggesting a duplicate retry.
 - `warnings` reads `get_warnings()` in the helper's deterministic oldest-first ID order. Display numbers remain contiguous and 1-based, distinct from database IDs. Database datetime values are rendered in UTC; nullable reasons/timestamps have fallbacks, and uncached moderators retain their ID mention.
@@ -179,16 +179,30 @@ Verification: **45 tests passed**, including nine PostgreSQL 17 integration test
 
 Nine focused warning-flow checks cover write-before-feedback ordering, denied hierarchy, closed DMs, nullable fields and UTC display, database read/write failures, count failure after a successful insert, and no false success/modlog on failed deletion. Earlier zero-count/deletion regression tests now exercise the DB-backed command contract. Prior settings and startup regression tests also pass.
 
-Owner verification next: issue and list several warnings, restart the bot, delete a displayed warning number, remove the latest N, reject zero/out-of-range selections, and clear all. Confirm DMs/modlogs and guild/user isolation as appropriate. Existing JSON warnings are not imported. Wait for owner approval before Phase 5.
+The owner subsequently verified and approved Phase 4 and authorized Phase 5. Existing JSON warnings are not imported.
 
 ### Phase 5: Refactor blacklists and AutoMod cache
 
-- Switch `blacklist addword`, `removeword`, `listwords`, `addlink`, `removelink`, and `listlinks` to DB-backed behavior.
-- Replace the JSON-backed `all_blacklists_data` initialization with a DB-backed in-memory cache.
-- Keep normal `on_message` blacklist checks in memory rather than issuing a DB query for every message.
-- Populate the cache before it is needed and update/invalidate it consistently after successful DB mutations; failed writes must not appear successful in the cache.
-- Preserve current input normalization and guild isolation. Define the cache lifecycle and document any single-process assumption.
-- Verify cache initialization, add/remove visibility, restart persistence, and AutoMod behavior.
+**Status: IMPLEMENTED; owner verification pending.**
+
+- All six blacklist commands use `db/blacklists.py`. Add/remove commands share mutation handling; list commands read PostgreSQL and refresh the corresponding guild/type in the cache. Existing command names, aliases, and parent permission checks are preserved.
+- Input still joins command arguments, splits on commas and whitespace, strips, and lowercases entries. Empty input and invalid entries (over 255 characters or containing NUL) are rejected before any writes in the batch.
+- Removed the cog's JSON blacklist loading and load/save imports. `utils.py`, JSON helper functions, and all JSON files remain untouched for Phase 6.
+
+Cache lifecycle and consistency:
+
+1. Each `Moderation` instance owns an integer-guild-ID cache and per-guild async locks. `cog_load()` awaits a full `get_all_blacklists()` snapshot before discord.py registers the cog's commands/listeners. A load failure propagates and prevents that cog from registering; the existing extension loader logs the failure (it does not terminate the whole bot). No background refresh task is created.
+2. Normal AutoMod blacklist matching reads only memory, including for previously unseen guilds, which have empty lists. It does not acquire a database connection or trigger lazy loading. A matched violation still invokes the existing modlog helper, whose separate settings lookup can query PostgreSQL; there is no DB query for every message.
+3. A per-guild lock serializes all word/link mutations and list refreshes in this process. After each helper returns, the cache is updated immediately without another await. Failed writes never optimistically add/remove cache entries. A duplicate-add or absent-remove result also confirms that entry's database state and reconciles its cache membership.
+4. Multi-entry commands use individual database commits, not a batch transaction. On a failure, processing stops; prior confirmed commits remain cached and are reported/logged accurately. The failed and unprocessed entries are not claimed as successful. List-read failures preserve the last known cache instead of replacing it with an empty list.
+5. Restarting or reloading the cog rebuilds the full cache. Successful list commands refresh the requested guild/type. Unloading removes the registered cog; there are no cache background tasks to cancel. Local state is discarded with the instance.
+6. **Single-process assumption:** one active bot process performs blacklist writes through these commands. Direct SQL edits, other bot processes, or external writers do not automatically invalidate this cache. Use list commands to refresh the relevant guild/type or reload/restart for a full snapshot. A network failure after a server commit can have an ambiguous outcome; the command does not claim success, and a subsequent successful list refresh or reload reconciles the cache. Cross-process invalidation and periodic refresh remain outside this phase.
+
+Verification: **55 tests passed**, including eleven PostgreSQL 17 integration tests, using Python 3.13.5 and pinned dependencies through `uv`. New integration scenarios exercise all six commands, normalization/duplicates, cache loading after pool/cog recreation, AutoMod deletion and guild isolation, successful removals, and a real server-side constraint failure midway through a batch. The failure check confirms PostgreSQL and the cache retain exactly the earlier committed entries.
+
+Eight new isolated cache/command tests cover initialization before registration, failed-load registration prevention, failed add/remove behavior, partial progress, input validation, list-refresh failures, concurrent refresh/edit ordering, and memory-only blacklist matching with DM/bot/command exclusions. Existing permission, settings, warning, and startup regressions also pass. Discord I/O was mocked; this phase did not access Neon or a live Discord connection. The disposable test container was removed after verification.
+
+Owner verification next: configure words and links through the commands, verify both lists and AutoMod, remove entries and confirm they stop matching, restart the bot and verify persistence, and check guild isolation. Existing JSON blacklists are not imported. Wait for owner approval before Phase 6.
 
 ### Phase 6: Final JSON cleanup
 
@@ -205,7 +219,7 @@ Owner verification next: issue and list several warnings, restart the bot, delet
 | --- | --- |
 | `warnings.json` | No active consumers after Phase 4. File and JSON helpers retained untouched until Phase 6. |
 | `modlog_settings.json` | No active consumers after Phase 3. File and JSON helpers retained untouched until Phase 6. |
-| `blacklists.json` | Cog initialization loads `all_blacklists_data`; mutations update/save it; list commands and AutoMod read the dictionary. |
+| `blacklists.json` | No active consumers after Phase 5. File and JSON helpers retained untouched until Phase 6. |
 | `confession_channels.json` | No active consumers after Phase 3. File and JSON helpers retained untouched until Phase 6. |
 
 ## Non-migration issue tracker
@@ -227,9 +241,9 @@ Regression verification: `tests/test_review_fixes.py` contains six passing offli
 
 ## Migration and hosting considerations
 
-- PostgreSQL is required for startup and now backs modlog/confession settings and warnings. Blacklist persistence remains JSON-based until Phase 5.
+- PostgreSQL is required for startup and now backs all four migrated data categories. The blacklist cache is loaded before the moderation cog becomes active.
 - There is no explicit database pool shutdown handling yet. Missing/invalid startup configuration, including `DATABASE_URL`, is now validated in `config.py`.
-- JSON operations remain synchronous and overwrite whole files; invalid JSON is treated as empty data and may be overwritten by later saves.
+- Legacy JSON helpers remain synchronous and overwrite whole files, but no active commands call them after Phase 5. Their removal is reserved for Phase 6.
 - The README currently documents `BOT_TOKEN` and environment-provided emojis, whereas the code reads `DISCORD_TOKEN` and uses hardcoded emojis. It also describes pip and JSON storage.
 - Completing these six phases does not itself deploy the bot or establish 24/7 hosting. Hosting setup and operational verification remain separate work.
 
@@ -250,3 +264,4 @@ Use `uv` for dependency management going forward. The dependency migration must 
 | 2026-10-02 | Ran an owner-requested one-off sanity check against the real Neon URL in `.env`. | Every public DB helper passed; committed rows, guild isolation, removals, and pool round trips verified. Temporary rows and script removed. Cold-start suspension unconfirmed; owner sign-off still pending. |
 | 2026-10-02 | Owner verified and approved Phase 2. Implemented Phase 3 modlog/confession settings consumers and removed obsolete cog settings state. | All 35 tests passed, including eight isolated PostgreSQL integration tests. JSON helper bodies unchanged; test container removed. Phase 3 awaits owner verification; Phase 4 has not started. |
 | 2026-10-02 | Owner verified and approved Phase 3. Implemented Phase 4 warning commands and removed obsolete cog warnings state. | All 45 tests passed, including nine isolated PostgreSQL integration tests. JSON helpers/files retained. Phase 4 awaits owner verification; Phase 5 has not started. |
+| 2026-10-03 | Owner verified and approved Phase 4. Implemented Phase 5 blacklist commands and DB-backed in-memory AutoMod cache. | All 55 tests passed, including eleven isolated PostgreSQL integration tests. Cache lifecycle/single-process assumptions documented; JSON helpers/files untouched. Awaiting owner verification before Phase 6. |

@@ -10,11 +10,11 @@ import json # Ensure json is imported for loading/saving data
 import logging
 from db import settings as db_settings
 from db import warnings as db_warnings
+from db import blacklists as db_blacklists
 
 # Import your helper functions from utils.py
 from utils import (
     send_modlog_embed, parse_duration,
-    load_blacklists, save_blacklists,
 )
 
 log = logging.getLogger(__name__)
@@ -25,9 +25,16 @@ class Moderation(commands.Cog):
         # You can keep track of muted users if needed, though Discord's timeout handles most of it
         self.muted_users = {}
 
-        # Load dynamic blacklists
-        self.all_blacklists_data = load_blacklists()
-        print("Loaded all blacklists data")
+        # cog_load fills this before discord.py registers commands/listeners.
+        self.all_blacklists_data: dict[int, db_blacklists.GuildBlacklist] = {}
+        self._blacklist_locks: dict[int, asyncio.Lock] = {}
+
+    async def cog_load(self):
+        """Load once per cog instance; failure prevents registration of this cog."""
+        self.all_blacklists_data = await db_blacklists.get_all_blacklists(self.bot.db_pool)
+
+    def _blacklist_lock(self, guild_id: int) -> asyncio.Lock:
+        return self._blacklist_locks.setdefault(guild_id, asyncio.Lock())
 
     # --- Helper Method: Hierarchy Check ---
     async def _check_hierarchy(self, ctx, member, action_name):
@@ -52,10 +59,8 @@ class Moderation(commands.Cog):
         return True
 
     # --- Helper Method: Get Guild Blacklists ---
-    def _get_guild_blacklists(self, guild_id: str):
-        if guild_id not in self.all_blacklists_data:
-            self.all_blacklists_data[guild_id] = {"blacklisted_words": [], "blacklisted_links": []}
-        return self.all_blacklists_data[guild_id]
+    def _get_guild_blacklists(self, guild_id: int):
+        return self.all_blacklists_data.get(guild_id, {"blacklisted_words": [], "blacklisted_links": []})
 
     # --- Automod on_message event listener ---
     @commands.Cog.listener()
@@ -77,7 +82,7 @@ class Moderation(commands.Cog):
             return # If it's a command, just exit this listener early.
 
         # --- Automod logic (now runs AFTER the command check) ---
-        guild_id = str(message.guild.id)
+        guild_id = message.guild.id
         guild_blacklists = self._get_guild_blacklists(guild_id)
         blacklisted_words_for_guild = guild_blacklists.get("blacklisted_words", [])
         blacklisted_links_for_guild = guild_blacklists.get("blacklisted_links", [])
@@ -765,262 +770,113 @@ class Moderation(commands.Cog):
         if ctx.invoked_subcommand is None:
             await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please specify a subcommand like `addword`, `removeword`, `listwords`, `addlink`, `removelink`, or `listlinks`. For more info, type `eli help blacklist`. {self.bot.EMOJIS['SPARKLE']}")
 
-    @blacklist_group.command(name='addword')
-    async def blacklist_addword(self, ctx, *words_input: str): # Renamed to words_input for clarity
-        """Adds one or more words to the blacklisted words list for this server.
-        Handles comma-separated words.
-        Usage: `eli blacklist addword <word1> [word2,word3] [word4]...`
+    async def _change_blacklist(self, ctx, inputs, *, kind, remove=False):
+        """Serialize guild mutations; publish each entry only after DB confirmation.
+
+        A multi-entry command consists of individual commits. If one fails, stop
+        and report partial progress; already committed entries remain cached.
         """
-        if not words_input:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to add. {self.bot.EMOJIS['SPARKLE']}")
+        entries = [word.lower().strip() for part in " ".join(inputs).split(',') for word in part.split()]
+        if not entries:
+            await ctx.send(f"Please provide at least one {kind} to {'remove' if remove else 'add'}.")
+            return
+        if any(len(entry) > 255 or "\x00" in entry for entry in entries):
+            await ctx.send("Each blacklist entry must contain 1-255 characters and no NUL characters. No changes were made.")
+            return
 
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
+        helpers = {
+            ("word", False): db_blacklists.add_word,
+            ("word", True): db_blacklists.remove_word,
+            ("link", False): db_blacklists.add_link,
+            ("link", True): db_blacklists.remove_link,
+        }
+        mutate = helpers[kind, remove]
+        key = "blacklisted_words" if kind == "word" else "blacklisted_links"
+        changed = []
+        skipped = []
+        failed = False
+        async with self._blacklist_lock(ctx.guild.id):
+            for entry in entries:
+                try:
+                    did_change = await mutate(self.bot.db_pool, ctx.guild.id, entry)
+                except Exception:
+                    log.exception("Blacklist mutation failed for guild %s (%s)", ctx.guild.id, kind)
+                    failed = True
+                    break
+                # No await between confirmed commit and cache update. A False
+                # result also confirms presence (add) or absence (remove).
+                guild_cache = self.all_blacklists_data.setdefault(
+                    ctx.guild.id, {"blacklisted_words": [], "blacklisted_links": []},
+                )
+                cached = guild_cache[key]
+                if remove:
+                    guild_cache[key] = [value for value in cached if value != entry]
+                elif entry not in cached:
+                    guild_cache[key] = [*cached, entry]
+                (changed if did_change else skipped).append(entry)
 
-        added_count = 0
-        skipped_words = []
-
-        # --- NEW PARSING LOGIC ---
-        # Join all parts of the input, then split by commas.
-        # Each part is then further split by whitespace to handle 'word1, word2'
-        processed_words = []
-        full_input_string = " ".join(words_input)
-        for part_by_comma in full_input_string.split(','):
-            # Split each comma-separated part by whitespace
-            for final_word_candidate in part_by_comma.split():
-                cleaned_word = final_word_candidate.lower().strip()
-                if cleaned_word: # Ensure it's not empty after stripping
-                    processed_words.append(cleaned_word)
-        # --- END NEW PARSING LOGIC ---
-
-        if not processed_words: # If no valid words were found after all parsing
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid words were provided after parsing. Please ensure words are separated by spaces or commas. {self.bot.EMOJIS['SPARKLE']}")
-
-
-        for word in processed_words:
-            if word in guild_blacklists["blacklisted_words"]:
-                # Use the originally provided word (before cleaning) for better feedback,
-                # or the cleaned word if you prefer consistency. Using cleaned word for skipped.
-                skipped_words.append(word)
-            else:
-                guild_blacklists["blacklisted_words"].append(word)
-                added_count += 1
-
-        if added_count > 0:
-            save_blacklists(self.all_blacklists_data)
-            feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} word(s) to this server's blacklisted words list."
-            if skipped_words:
-                feedback += f"\nSkipped {len(skipped_words)} word(s) already present: `{'`, `'.join(skipped_words)}`."
-
-            await ctx.send(feedback)
+        verb = "Removed" if remove else "Added"
+        feedback = f"{verb} {len(changed)} {kind}(s). Skipped {len(skipped)} {'not present' if remove else 'already present'}."
+        if failed:
+            feedback += " An update failed; stopped processing. The confirmed changes above were saved. Check the list before retrying."
+        await ctx.send(feedback)
+        if changed:
             await send_modlog_embed(
-                self.bot,
-                ctx.guild,
-                "Blacklist Update",
-                ctx.author,
-                self.bot.user,
-                f"Added {added_count} word(s) to server blacklist. Skipped {len(skipped_words)}: `{'`, `'.join(skipped_words)}`"
+                self.bot, ctx.guild, "Blacklist Update", ctx.author, self.bot.user,
+                f"{verb} {len(changed)} {kind}(s): " + ", ".join(changed),
             )
-        else:
-            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new words were added. All provided words were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+
+    async def _list_blacklist(self, ctx, *, kind):
+        """Refresh this guild/type from PostgreSQL; never erase cache on failure."""
+        key = "blacklisted_words" if kind == "word" else "blacklisted_links"
+        getter = db_blacklists.get_words if kind == "word" else db_blacklists.get_links
+        async with self._blacklist_lock(ctx.guild.id):
+            try:
+                entries = await getter(self.bot.db_pool, ctx.guild.id)
+            except Exception:
+                log.exception("Blacklist read failed for guild %s (%s)", ctx.guild.id, kind)
+                await ctx.send("I couldn't load the blacklist. Please try again later.")
+                return
+            self.all_blacklists_data.setdefault(
+                ctx.guild.id, {"blacklisted_words": [], "blacklisted_links": []},
+            )[key] = entries
+        if not entries:
+            await ctx.send(f"There are no blacklisted {kind}s for this server currently.")
+            return
+        await ctx.send(embed=discord.Embed(
+            title=f"{self.bot.EMOJIS['BUTTERFLY']} Blacklisted {kind.title()}s for {ctx.guild.name}",
+            description="\n".join(f"- `{entry}`" for entry in entries), color=0xFFB6C1,
+        ))
+
+    @blacklist_group.command(name='addword')
+    async def blacklist_addword(self, ctx, *words_input: str):
+        """Add words, separated by commas or spaces, to this server's blacklist."""
+        await self._change_blacklist(ctx, words_input, kind="word")
 
     @blacklist_group.command(name='removeword', aliases=['delword'])
-    async def blacklist_removeword(self, ctx, *words_input: str): # Renamed to words_input
-        """Removes one or more words from the blacklisted words list for this server.
-        Handles comma-separated words.
-        Usage: `eli blacklist removeword <word1> [word2,word3] [word4]...`
-        """
-        if not words_input:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one word to remove. {self.bot.EMOJIS['SPARKLE']}")
-
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-
-        removed_count = 0
-        skipped_words = []
-
-        # --- NEW PARSING LOGIC ---
-        processed_words = []
-        full_input_string = " ".join(words_input)
-        for part_by_comma in full_input_string.split(','):
-            for final_word_candidate in part_by_comma.split():
-                cleaned_word = final_word_candidate.lower().strip()
-                if cleaned_word:
-                    processed_words.append(cleaned_word)
-        # --- END NEW PARSING LOGIC ---
-
-        if not processed_words:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid words were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
-
-
-        for word in processed_words:
-            if word in guild_blacklists["blacklisted_words"]:
-                guild_blacklists["blacklisted_words"].remove(word)
-                removed_count += 1
-            else:
-                skipped_words.append(word)
-
-        if removed_count > 0:
-            save_blacklists(self.all_blacklists_data)
-            feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} word(s) from this server's blacklisted words list."
-            if skipped_words:
-                feedback += f"\nSkipped {len(skipped_words)} word(s) not found: `{'`, `'.join(skipped_words)}`."
-            await ctx.send(feedback)
-            await send_modlog_embed(
-                self.bot,
-                ctx.guild,
-                "Blacklist Update",
-                ctx.author,
-                self.bot.user,
-                f"Removed {removed_count} word(s) from server blacklist. Skipped {len(skipped_words)}: `{'`, `'.join(skipped_words)}`"
-            )
-        else:
-            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No words were removed. All provided words were not found in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+    async def blacklist_removeword(self, ctx, *words_input: str):
+        """Remove words, separated by commas or spaces, from this server's blacklist."""
+        await self._change_blacklist(ctx, words_input, kind="word", remove=True)
 
     @blacklist_group.command(name='listwords')
     async def blacklist_listwords(self, ctx):
-        """Lists all blacklisted words for this server.
-        Usage: `eli blacklist listwords`
-        """
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-        words_list_for_guild = guild_blacklists.get("blacklisted_words", [])
-
-        if not words_list_for_guild:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted words for this server currently. {self.bot.EMOJIS['SPARKLE']}")
-
-        words_formatted = "\n".join(f"- `{word}`" for word in words_list_for_guild)
-        embed = discord.Embed(
-            title=f"{self.bot.EMOJIS['BUTTERFLY']} Blacklisted Words for {ctx.guild.name} {self.bot.EMOJIS['BUTTERFLY']}",
-            description=words_formatted,
-            color=0xFFB6C1
-        )
-        await ctx.send(embed=embed)
+        """List this server's blacklisted words."""
+        await self._list_blacklist(ctx, kind="word")
 
     @blacklist_group.command(name='addlink')
-    async def blacklist_addlink(self, ctx, *links_input: str): # Renamed to links_input
-        """Adds one or more links to the blacklisted links list for this server.
-        Handles comma-separated links.
-        Usage: `eli blacklist addlink <link1> [link2,link3] [link4]...`
-        """
-        if not links_input:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to add. {self.bot.EMOJIS['SPARKLE']}")
-
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-
-        added_count = 0
-        skipped_links = []
-
-        # --- NEW PARSING LOGIC ---
-        processed_links = []
-        full_input_string = " ".join(links_input)
-        for part_by_comma in full_input_string.split(','):
-            for final_link_candidate in part_by_comma.split():
-                cleaned_link = final_link_candidate.lower().strip()
-                if cleaned_link:
-                    processed_links.append(cleaned_link)
-        # --- END NEW PARSING LOGIC ---
-
-        if not processed_links:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid links were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
-
-        for link in processed_links:
-            if link in guild_blacklists["blacklisted_links"]:
-                skipped_links.append(link)
-            else:
-                guild_blacklists["blacklisted_links"].append(link)
-                added_count += 1
-
-        if added_count > 0:
-            save_blacklists(self.all_blacklists_data)
-            feedback = f"{self.bot.EMOJIS['HEART']} Successfully added {added_count} link(s) to this server's blacklisted links list."
-            if skipped_links:
-                feedback += f"\nSkipped {len(skipped_links)} link(s) already present: `{'`, `'.join(skipped_links)}`."
-            await ctx.send(feedback)
-            await send_modlog_embed(
-                self.bot,
-                ctx.guild,
-                "Blacklist Update",
-                ctx.author,
-                self.bot.user,
-                f"Added {added_count} link(s) to server blacklist. Skipped {len(skipped_links)}: `{'`, `'.join(skipped_links)}`"
-            )
-        else:
-            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No new links were added. All provided links were already in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+    async def blacklist_addlink(self, ctx, *links_input: str):
+        """Add links, separated by commas or spaces, to this server's blacklist."""
+        await self._change_blacklist(ctx, links_input, kind="link")
 
     @blacklist_group.command(name='removelink', aliases=['dellink'])
-    async def blacklist_removelink(self, ctx, *links_input: str): # Renamed to links_input
-        """Removes one or more links from the blacklisted links list for this server.
-        Handles comma-separated links.
-        Usage: `eli blacklist removelink <link1> [link2,link3] [link4]...`
-        """
-        if not links_input:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} Please provide at least one link to remove. {self.bot.EMOJIS['SPARKLE']}")
-
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-
-        removed_count = 0
-        skipped_links = []
-
-        # --- NEW PARSING LOGIC ---
-        processed_links = []
-        full_input_string = " ".join(links_input)
-        for part_by_comma in full_input_string.split(','):
-            for final_link_candidate in part_by_comma.split():
-                cleaned_link = final_link_candidate.lower().strip()
-                if cleaned_link:
-                    processed_links.append(cleaned_link)
-        # --- END NEW PARSING LOGIC ---
-
-        if not processed_links:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No valid links were provided after parsing. {self.bot.EMOJIS['SPARKLE']}")
-
-
-        for link in processed_links:
-            if link in guild_blacklists["blacklisted_links"]:
-                guild_blacklists["blacklisted_links"].remove(link)
-                removed_count += 1
-            else:
-                skipped_links.append(link)
-
-        if removed_count > 0:
-            save_blacklists(self.all_blacklists_data)
-            feedback = f"{self.bot.EMOJIS['HEART']} Successfully removed {removed_count} link(s) from this server's blacklisted links list."
-            if skipped_links:
-                feedback += f"\nSkipped {len(skipped_links)} link(s) not found: `{'`, `'.join(skipped_links)}`."
-            await ctx.send(feedback)
-            await send_modlog_embed(
-                self.bot,
-                ctx.guild,
-                "Blacklist Update",
-                ctx.author,
-                self.bot.user,
-                f"Removed {removed_count} link(s) from server blacklist. Skipped {len(skipped_links)}: `{'`, `'.join(skipped_links)}`"
-            )
-        else:
-            await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} No links were removed. All provided links were not found in the blacklist. {self.bot.EMOJIS['SPARKLE']}")
+    async def blacklist_removelink(self, ctx, *links_input: str):
+        """Remove links, separated by commas or spaces, from this server's blacklist."""
+        await self._change_blacklist(ctx, links_input, kind="link", remove=True)
 
     @blacklist_group.command(name='listlinks')
     async def blacklist_listlinks(self, ctx):
-        """Lists all blacklisted links for this server.
-        Usage: `eli blacklist listlinks`
-        """
-        guild_id = str(ctx.guild.id)
-        guild_blacklists = self._get_guild_blacklists(guild_id)
-        links_list_for_guild = guild_blacklists.get("blacklisted_links", [])
-
-        if not links_list_for_guild:
-            return await ctx.send(f"{self.bot.EMOJIS['SPARKLE']} There are no blacklisted links for this server currently. {self.bot.EMOJIS['SPARKLE']}")
-
-        links_formatted = "\n".join(f"- `{link}`" for link in links_list_for_guild)
-        embed = discord.Embed(
-            title=f"{self.bot.EMOJIS['BUTTERFLY']} Blacklisted Links for {ctx.guild.name} {self.bot.EMOJIS['BUTTERFLY']}",
-            description=links_formatted,
-            color=0xFFB6C1
-        )
-        await ctx.send(embed=embed)
+        """List this server's blacklisted links."""
+        await self._list_blacklist(ctx, kind="link")
 
     # --- NEW: /setconfessionchannel Slash Command ---
     @app_commands.command(name='setconfessionchannel', description='Sets the channel for anonymous confessions.')

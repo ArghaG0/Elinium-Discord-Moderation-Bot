@@ -236,3 +236,58 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await blacklists.get_all_blacklists(self.pool))[2], {
             "blacklisted_words": ["blocked"], "blacklisted_links": ["blocked"],
         })
+
+    async def test_blacklist_commands_cache_reload_and_automod(self):
+        from unittest.mock import patch
+        from test_blacklist_flows import blacklist_cog, blacklist_context, message
+
+        cog = blacklist_cog(self.pool)
+        ctx = blacklist_context()
+        with patch("utils.load_blacklists", side_effect=AssertionError("Legacy JSON")), \
+                patch("utils.save_blacklists", side_effect=AssertionError("Legacy JSON")), \
+                patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock), patch("builtins.print"):
+            await cog.cog_load()
+            self.assertEqual(cog.all_blacklists_data, {})
+            await cog.blacklist_addword.callback(cog, ctx, " BLOCKED,second", "blocked")
+            await cog.blacklist_addlink.callback(cog, ctx, " BAD.INVALID ")
+            self.assertEqual(cog._get_guild_blacklists(1)["blacklisted_words"], ["blocked", "second"])
+            self.assertEqual(cog.all_blacklists_data, await blacklists.get_all_blacklists(self.pool))
+            for command in (cog.blacklist_listwords, cog.blacklist_listlinks):
+                await command.callback(cog, ctx)
+            async with asyncpg.create_pool(
+                os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2,
+                server_settings={"search_path": self.schema},
+            ) as restarted_pool:
+                restarted = blacklist_cog(restarted_pool)
+                await restarted.cog_load()
+                self.assertEqual(restarted.all_blacklists_data, cog.all_blacklists_data)
+                for text in ("BLOCKED", "bad.invalid"):
+                    bad = message(text)
+                    other = message(text, 2)
+                    await restarted.on_message(bad)
+                    await restarted.on_message(other)
+                    bad.delete.assert_awaited_once()
+                    other.delete.assert_not_awaited()
+                await restarted.blacklist_removeword.callback(restarted, ctx, "blocked,second")
+                await restarted.blacklist_removelink.callback(restarted, ctx, "bad.invalid")
+                self.assertEqual(await blacklists.get_words(restarted_pool, 1), [])
+                self.assertEqual(await blacklists.get_links(restarted_pool, 1), [])
+                allowed = message("blocked bad.invalid")
+                await restarted.on_message(allowed)
+                allowed.delete.assert_not_awaited()
+
+    async def test_real_write_failure_keeps_last_committed_cache(self):
+        from unittest.mock import patch
+        from test_blacklist_flows import blacklist_cog, blacklist_context
+        cog = blacklist_cog(self.pool)
+        ctx = blacklist_context()
+        await blacklists.add_word(self.pool, 1, "kept")
+        await cog.cog_load()
+        # Force a server-side statement failure without changing public helpers.
+        await self.pool.execute("ALTER TABLE blacklisted_words ADD CONSTRAINT reject_new CHECK (word <> 'reject')")
+        with patch("cogs.moderation.log.exception"), \
+                patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock):
+            await cog.blacklist_addword.callback(cog, ctx, "saved,reject,unprocessed")
+        self.assertEqual(await blacklists.get_words(self.pool, 1), ["kept", "saved"])
+        self.assertEqual(cog._get_guild_blacklists(1)["blacklisted_words"], ["kept", "saved"])
+        self.assertIn("update failed", ctx.send.call_args.args[0])

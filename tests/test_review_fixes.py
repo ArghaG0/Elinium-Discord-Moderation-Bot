@@ -45,12 +45,9 @@ class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
         self.bot = commands.Bot(command_prefix="eli ", intents=discord.Intents.none())
         self.bot.EMOJIS = configured_emojis()
         self.bot.db_pool = AsyncMock()
-        with patch.multiple(
-            "cogs.moderation",
-            load_blacklists=lambda: {},
-        ):
-            self.cog = Moderation(self.bot)
-        await self.bot.add_cog(self.cog)
+        self.cog = Moderation(self.bot)
+        with patch("cogs.moderation.db_blacklists.get_all_blacklists", new=AsyncMock(return_value={})):
+            await self.bot.add_cog(self.cog)
 
     async def asyncTearDown(self):
         await self.bot.close()

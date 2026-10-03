@@ -18,8 +18,7 @@ def make_cog(pool):
         EMOJIS={key: key for key in ("HEART", "SPARKLE", "RIBBON", "ERROR")},
         user=SimpleNamespace(id=99, name="Elinium", mention="<@99>", avatar=None),
     )
-    with patch("cogs.moderation.load_blacklists", return_value={}):
-        return Moderation(bot)
+    return Moderation(bot)
 
 
 def make_channel(channel_id):
