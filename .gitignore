@@ -8,10 +8,6 @@ __pycache__/
 .venv/
 venv/
 env/
-warnings.json
-modlog_settings.json
-blacklists.json
-confession_channels.json
 
 # Operating System specific
 # macOS

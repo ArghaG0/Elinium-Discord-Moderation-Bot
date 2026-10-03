@@ -1,4 +1,3 @@
-import json
 import discord
 import datetime
 import re # For parse_duration
@@ -6,85 +5,6 @@ import logging
 from db import settings as db_settings
 
 log = logging.getLogger(__name__)
-
-# --- Helper Functions for Warnings ---
-WARNINGS_FILE = 'warnings.json'
-
-def load_warnings():
-    """Loads warning data from warnings.json."""
-    try:
-        with open(WARNINGS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {} # Return empty dict if file doesn't exist
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from {WARNINGS_FILE}. Returning empty dictionary.")
-        return {}
-
-def save_warnings(warnings_data):
-    """Saves warning data to warnings.json."""
-    with open(WARNINGS_FILE, 'w') as f:
-        json.dump(warnings_data, f, indent=4)
-
-# --- NEW: Helper Functions for Blacklists ---
-# --- CORRECTED: Helper Functions for Per-Guild Blacklists ---
-BLACKLISTS_FILE = 'blacklists.json'
-
-def load_blacklists():
-    """Loads per-guild blacklisted words and links from blacklists.json."""
-    try:
-        with open(BLACKLISTS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        # IMPORTANT: Return empty dict if file doesn't exist, to represent no guilds having blacklists yet
-        return {}
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from {BLACKLISTS_FILE}. Returning empty dictionary for blacklists.")
-        return {}
-
-def save_blacklists(blacklists_data):
-    """Saves per-guild blacklisted words and links to blacklists.json."""
-    with open(BLACKLISTS_FILE, 'w') as f:
-        json.dump(blacklists_data, f, indent=4)
-
-# --- Confession helper function ---
-CONFESSION_CHANNELS_FILE = 'confession_channels.json'
-
-def load_confession_channels():
-    """Loads per-guild confession channel IDs from confession_channels.json."""
-    try:
-        with open(CONFESSION_CHANNELS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from {CONFESSION_CHANNELS_FILE}. Returning empty dictionary for confession channels.")
-        return {}
-
-def save_confession_channels(channels_data):
-    """Saves per-guild confession channel IDs to confession_channels.json."""
-    with open(CONFESSION_CHANNELS_FILE, 'w') as f:
-        json.dump(channels_data, f, indent=4)
-
-
-# --- Helper Functions for Modlog Channel ---
-MODLOG_SETTINGS_FILE = 'modlog_settings.json'
-
-def load_modlog_settings():
-    """Loads modlog channel settings from modlog_settings.json."""
-    try:
-        with open(MODLOG_SETTINGS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from {MODLOG_SETTINGS_FILE}. Returning empty dictionary.")
-        return {}
-
-def save_modlog_settings(settings_data):
-    """Saves modlog channel settings to modlog_settings.json."""
-    with open(MODLOG_SETTINGS_FILE, 'w') as f:
-        json.dump(settings_data, f, indent=4)
 
 # --- Modlog Embed Function ---
 async def send_modlog_embed(bot, guild, action_type, member, moderator, reason, duration=None, warning_count=None, purge_count=None):

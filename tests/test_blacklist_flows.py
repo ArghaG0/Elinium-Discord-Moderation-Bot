@@ -1,4 +1,4 @@
-"""Blacklist command/cache checks without live Discord or JSON access."""
+"""Blacklist command/cache checks without live Discord access."""
 import asyncio
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -33,8 +33,6 @@ class BlacklistFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name in ("load_blacklists", "save_blacklists"):
-            self.stack.enter_context(patch(f"utils.{name}", side_effect=AssertionError("Legacy JSON")))
         self.stack.enter_context(patch("cogs.moderation.log.exception"))
         self.modlog = self.stack.enter_context(patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock))
         self.pool = object()

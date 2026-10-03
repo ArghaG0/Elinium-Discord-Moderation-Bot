@@ -1,4 +1,4 @@
-"""Warning command regression checks; no live Discord or legacy JSON access."""
+"""Warning command regression checks; no live Discord access."""
 
 from contextlib import ExitStack
 from datetime import datetime, timezone, timedelta
@@ -31,8 +31,6 @@ class WarningFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name in ("load_warnings", "save_warnings"):
-            self.stack.enter_context(patch(f"utils.{name}", side_effect=AssertionError("Legacy warnings I/O")))
         self.stack.enter_context(patch("cogs.moderation.log.exception"))
         self.modlog = self.stack.enter_context(patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock))
         self.pool = object()

@@ -66,6 +66,61 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.pool.close)
         await init_db(self.pool)
 
+    async def test_startup_loads_cogs_and_persistent_cache(self):
+        import sys
+        import textwrap
+
+        await blacklists.add_word(self.pool, 1, "blocked")
+        # Extension loading/unloading replaces sys.modules entries. Use a fresh
+        # interpreter so existing test fixtures retain their original modules.
+        script = textwrap.dedent("""
+            import asyncio
+            import os
+            import sys
+            from unittest.mock import patch
+            import asyncpg
+            import main
+            from config import load_config
+
+            async def check():
+                bot = main.bot
+                bot.config = load_config({
+                    "DISCORD_TOKEN": "test-token",
+                    "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
+                })
+                create_pool = asyncpg.create_pool
+                def isolated_pool(*args, **kwargs):
+                    return create_pool(*args, **kwargs, server_settings={"search_path": sys.argv[1]})
+                with patch("main.asyncpg.create_pool", new=isolated_pool):
+                    await main.setup_hook()
+                try:
+                    await main.load_extensions()
+                    assert set(bot.cogs) == {"General", "Moderation"}
+                    for name in ("setmodlogchannel", "warn", "warnings", "clearwarnings",
+                                 "blacklist addword", "blacklist removeword", "blacklist listwords",
+                                 "blacklist addlink", "blacklist removelink", "blacklist listlinks"):
+                        assert bot.get_command(name) is not None, name
+                    for name in ("setconfessionchannel", "confess"):
+                        assert bot.tree.get_command(name) is not None, name
+                    assert bot.get_cog("Moderation")._get_guild_blacklists(1)["blacklisted_words"] == ["blocked"]
+                    assert await bot.db_pool.fetchval("SELECT 1") == 1
+                finally:
+                    await bot.close()
+                    await bot.db_pool.close()
+            asyncio.run(check())
+        """)
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-B", "-c", script, self.schema,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(), timeout=90)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+        self.assertEqual(process.returncode, 0, output.decode(errors="replace"))
+
     async def test_settings_upserts_preserve_other_channel_and_guild(self):
         self.assertEqual(await settings.get_settings(self.pool, 1), settings.GuildSettings(1))
         await asyncio.gather(
@@ -90,8 +145,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         interaction = make_interaction(channels={100: modlog, 200: confession})
         ctx = SimpleNamespace(guild=interaction.guild, author=interaction.user, send=AsyncMock())
         cog = make_cog(self.pool)
-        with patch("utils.load_modlog_settings", side_effect=AssertionError("Legacy JSON")), \
-                patch("utils.load_confession_channels", side_effect=AssertionError("Legacy JSON")):
+        with patch("builtins.print"):
             await cog.set_modlog_channel.callback(cog, ctx, modlog)
             await cog.set_confession_channel.callback(cog, interaction, confession)
             self.assertEqual(await settings.get_settings(self.pool, 1), settings.GuildSettings(1, 100, 200))
@@ -143,9 +197,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
         cog = warning_cog(self.pool)
         ctx, member = warning_context()
-        with patch("utils.load_warnings", side_effect=AssertionError("Legacy JSON")), \
-                patch("utils.save_warnings", side_effect=AssertionError("Legacy JSON")), \
-                patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock) as modlog, \
+        with patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock) as modlog, \
                 patch("builtins.print"):
             for reason in ("first", "second", "third", "fourth"):
                 await cog.warn_user.callback(cog, ctx, member, reason=reason)
@@ -243,9 +295,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
         cog = blacklist_cog(self.pool)
         ctx = blacklist_context()
-        with patch("utils.load_blacklists", side_effect=AssertionError("Legacy JSON")), \
-                patch("utils.save_blacklists", side_effect=AssertionError("Legacy JSON")), \
-                patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock), patch("builtins.print"):
+        with patch("cogs.moderation.send_modlog_embed", new_callable=AsyncMock), patch("builtins.print"):
             await cog.cog_load()
             self.assertEqual(cog.all_blacklists_data, {})
             await cog.blacklist_addword.callback(cog, ctx, " BLOCKED,second", "blocked")

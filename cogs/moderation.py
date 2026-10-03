@@ -6,7 +6,6 @@ import asyncio
 from datetime import datetime, timezone # Import datetime and timezone specifically for utc
 from typing import Optional
 from discord import app_commands
-import json # Ensure json is imported for loading/saving data
 import logging
 from db import settings as db_settings
 from db import warnings as db_warnings

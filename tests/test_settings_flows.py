@@ -1,6 +1,5 @@
 """Settings command flows with mocked Discord I/O and database helpers."""
 
-from contextlib import ExitStack
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,15 +41,10 @@ def make_interaction(guild_id=1, channels=None):
 
 class SettingsFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.patches = ExitStack()
-        self.addCleanup(self.patches.close)
-        # Retained legacy helpers must never be used by these migrated flows.
-        for name in ("load_modlog_settings", "save_modlog_settings", "load_confession_channels", "save_confession_channels"):
-            self.patches.enter_context(patch(f"utils.{name}", side_effect=AssertionError("Legacy settings I/O")))
         self.pool = object()
         self.cog = make_cog(self.pool)
 
-    def test_constructor_has_no_json_settings_state(self):
+    def test_constructor_has_no_obsolete_settings_state(self):
         self.assertFalse(hasattr(self.cog, "all_modlog_settings"))
         self.assertFalse(hasattr(self.cog, "confession_channels_data"))
 
