@@ -1,0 +1,14 @@
+[project]
+name = "elinium"
+version = "0.1.0"
+description = "A discord.py moderation and utility bot with PostgreSQL persistence."
+readme = "README.md"
+requires-python = ">=3.13.5,<3.14"
+dependencies = [
+    "asyncpg==0.30.0",
+    "discord.py==2.5.2",
+    "python-dotenv==1.1.1",
+]
+
+[tool.uv]
+package = false

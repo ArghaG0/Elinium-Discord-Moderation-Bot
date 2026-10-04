@@ -4,7 +4,7 @@ Elinium is a Python discord.py bot with moderation, utility commands, confession
 
 ## Setup
 
-Use Python 3.13.5 (the verified version), [uv](https://docs.astral.sh/uv/getting-started/installation/), a Discord bot token, and a PostgreSQL database. Production storage uses Neon.
+Use Python 3.13.5 (selected by `.python-version`; supported range `>=3.13.5,<3.14`), [uv](https://docs.astral.sh/uv/getting-started/installation/), a Discord bot token, and a PostgreSQL database. Production storage uses Neon.
 
 1. In the Discord Developer Portal, enable the Message Content, Server Members, and Presence privileged intents requested by `main.py`.
 2. Invite the bot with bot/application-command scopes and the permissions needed for your chosen commands. Moderation actions also depend on Discord role hierarchy.
@@ -12,10 +12,11 @@ Use Python 3.13.5 (the verified version), [uv](https://docs.astral.sh/uv/getting
 4. From the repository root, run:
 
 ```sh
-uv run --no-project --python 3.13.5 --with-requirements requirements.txt python main.py
+uv sync
+uv run main.py
 ```
 
-`uv` supplies the pinned dependencies in an isolated environment. `requirements.txt` is currently the dependency source of truth. Project metadata and a lockfile (`pyproject.toml` and `uv.lock`) are a separately pending migration; this repository does not yet use `uv sync`.
+`pyproject.toml` declares the three direct dependencies; `uv.lock` records their complete resolved dependency graph. `uv sync` installs into the ignored `.venv/`; no manual environment activation is needed. Commit both project files when changing dependencies. For deployments, use `uv sync --locked` and `uv run --locked main.py` to require the checked-in lockfile. See [uv locking and syncing](https://docs.astral.sh/uv/concepts/projects/sync/).
 
 | Variable | Purpose |
 | --- | --- |
@@ -47,6 +48,7 @@ Other features include moderation actions, user/server information, and utility 
 
 ## Project layout
 
+- `pyproject.toml`, `uv.lock`, `.python-version`: dependency metadata, resolved versions, and default interpreter.
 - `main.py`: entry point, pool startup, extension loading, bot-level commands.
 - `config/config.py`: validated environment configuration.
 - `cogs/`: general and moderation commands/listeners.
@@ -60,7 +62,7 @@ Other features include moderation actions, user/server information, and utility 
 If the local `tests/` folder is present, run the regression suite through the same dependency environment. Tests are retained locally but no longer tracked by Git:
 
 ```sh
-uv run --no-project --python 3.13.5 --with-requirements requirements.txt python -B -m unittest discover -s tests -v
+uv run python -B -m unittest discover -s tests -v
 ```
 
 For database integration checks, explicitly set `TEST_DATABASE_URL` to a disposable PostgreSQL database before running that command. The test role must be able to create/drop schemas. Each test creates and removes its own unique schema. Without that variable, integration tests skip; they never read `.env` or fall back to `DATABASE_URL`. Discord I/O is mocked; the suite does not log in or sync live slash commands.
@@ -69,4 +71,4 @@ For database integration checks, explicitly set `TEST_DATABASE_URL` to a disposa
 
 Run from the repository root on a host that keeps the bot process running and can reach PostgreSQL and Discord. Supply the same environment configuration securely. There is no keep-alive web server in this repository.
 
-`discloud.config` is retained pending an owner decision; its presence does not mean deployment or automatic restart has been verified. Pool shutdown handling and repeated `on_ready` synchronization remain deferred. The six PostgreSQL phases do not themselves establish 24/7 hosting. See the [migration plan](docs/MIGRATION_PLAN.md) for current status and remaining work.
+Pool shutdown handling and repeated `on_ready` synchronization remain deferred. The six PostgreSQL phases do not themselves establish 24/7 hosting. See the [migration plan](docs/MIGRATION_PLAN.md) for current status and remaining work.
