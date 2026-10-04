@@ -11,8 +11,8 @@ from db import settings as db_settings
 from db import warnings as db_warnings
 from db import blacklists as db_blacklists
 
-# Import your helper functions from utils.py
-from utils import (
+# Import your helper functions from utils/utils.py
+from utils.utils import (
     send_modlog_embed, parse_duration,
 )
 

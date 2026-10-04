@@ -1,8 +1,8 @@
 # Elinium
 
-Elinium is a Python discord.py bot with moderation, utility commands, confessions, and PostgreSQL persistence. Prefix commands use `eli `; `eli cmds` lists available commands.
+Elinium is a Python discord.py bot with moderation, utility commands, confessions, and PostgreSQL persistence. The bot is currently run on a local machine, not hosted 24/7. Prefix commands use `eli `; `eli cmds` lists available commands.
 
-## Setup
+## Local setup
 
 Use Python 3.13.5 (selected by `.python-version`; supported range `>=3.13.5,<3.14`), [uv](https://docs.astral.sh/uv/getting-started/installation/), a Discord bot token, and a PostgreSQL database. Production storage uses Neon.
 
@@ -29,7 +29,7 @@ Startup validates configuration before opening connections. Keep `.env` private;
 
 ## Storage and commands
 
-Startup opens an asyncpg pool and creates missing tables/indexes through `utils.init_db()`. The database role needs permission to initialize the schema. `CREATE TABLE IF NOT EXISTS` does not upgrade an existing table definition.
+Startup opens an asyncpg pool and creates missing tables/indexes through `utils.utils.init_db()`. The database role needs permission to initialize the schema. `CREATE TABLE IF NOT EXISTS` does not upgrade an existing table definition.
 
 | Data | PostgreSQL table | Commands |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ Other features include moderation actions, user/server information, and utility 
 - `config/config.py`: validated environment configuration.
 - `cogs/`: general and moderation commands/listeners.
 - `db/`: settings, warnings, and blacklist data access.
-- `utils.py`: schema initialization, modlog embeds, duration parsing.
+- `utils/utils.py`: schema initialization, modlog embeds, duration parsing.
 - `tests/`: local regression and opt-in PostgreSQL integration tests (ignored by Git; not included in fresh clones).
 - `docs/MIGRATION_PLAN.md`: migration decisions, verification history, deferred work.
 
@@ -67,8 +67,25 @@ uv run python -B -m unittest discover -s tests -v
 
 For database integration checks, explicitly set `TEST_DATABASE_URL` to a disposable PostgreSQL database before running that command. The test role must be able to create/drop schemas. Each test creates and removes its own unique schema. Without that variable, integration tests skip; they never read `.env` or fall back to `DATABASE_URL`. Discord I/O is mocked; the suite does not log in or sync live slash commands.
 
-## Hosting status
+## Limitations
 
-Run from the repository root on a host that keeps the bot process running and can reach PostgreSQL and Discord. Supply the same environment configuration securely. There is no keep-alive web server in this repository.
+- The bot runs only while a local machine keeps the process running and stays connected. It goes offline when that machine is off, disconnected, or the process stops.
+- No 24/7 cloud hosting is currently set up. Running Docker locally has the same uptime limitation.
+- PostgreSQL is cloud-hosted on Neon and persists independently of the bot process. Stored settings, warnings, and blacklists are retained while the bot is offline.
 
-Pool shutdown handling and repeated `on_ready` synchronization remain deferred. The six PostgreSQL phases do not themselves establish 24/7 hosting. See the [migration plan](docs/MIGRATION_PLAN.md) for current status and remaining work.
+## Docker (alternative run method)
+
+Docker is available as an alternative to the local uv commands above, including for a future 24/7 host. Building an image does not deploy it or establish continuous hosting.
+
+```sh
+docker build -t elinium:local .
+docker run --rm --name elinium --env-file .env elinium:local
+```
+
+Stop it from another terminal with `docker stop elinium`. Run only one bot instance at a time, including local uv processes, to preserve the blacklist cache's single-process assumption. No ports need publishing; the bot makes outbound connections to Discord and Neon.
+
+Supply the same environment variables at runtime. `.env` is excluded from the build context and image. Docker's `--env-file` expects literal `KEY=value` entries without shell expansion or surrounding quotes; alternatively configure these variables through your host's secret settings. Do not put credentials in the Dockerfile.
+
+The image uses official Python 3.13.5 slim and a pinned uv build stage, installing from `uv.lock` with `uv sync --locked --no-dev`. The final image runs as a non-root user with the installed Python environment and no uv installer/build tools. See [uv's Docker guide](https://docs.astral.sh/uv/guides/integration/docker/) for the build approach.
+
+Pool shutdown handling and repeated `on_ready` synchronization remain deferred. See the [migration plan](docs/MIGRATION_PLAN.md) for remaining work.

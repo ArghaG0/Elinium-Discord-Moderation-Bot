@@ -5,7 +5,7 @@ import datetime
 import logging
 import asyncpg
 from config.config import ConfigError, load_config
-from utils import init_db
+from utils.utils import init_db
 
 log = logging.getLogger(__name__)
 # Define your global emojis here. These will be accessible by all cogs via 'bot' object.

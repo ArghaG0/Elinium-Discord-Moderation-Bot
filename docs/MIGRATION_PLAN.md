@@ -8,7 +8,7 @@ Elinium is a Python Discord bot built with discord.py and cogs. It is migrating 
 
 **Start fresh in PostgreSQL. Do not import old JSON data or create an import script.** All storage consumers use PostgreSQL. Phase 6 removed the four legacy JSON files and their unused helpers. No historical data was imported.
 
-`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config/config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils.py` contains moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog/confession settings, warnings, and blacklists now use PostgreSQL. AutoMod checks a PostgreSQL-backed in-memory blacklist cache.
+`main.py` creates the bot, initializes the database, and loads `cogs/general.py` and `cogs/moderation.py`. `config/config.py` validates startup environment configuration. `db/` contains asynchronous PostgreSQL helpers. `utils/utils.py` contains moderation-log rendering, duration parsing, and the unchanged Phase 1 schema initialization. Modlog/confession settings, warnings, and blacklists now use PostgreSQL. AutoMod checks a PostgreSQL-backed in-memory blacklist cache.
 
 ## Required workflow for every coding agent
 
@@ -23,7 +23,7 @@ Current checkpoint: All six PostgreSQL phases are implemented. Phases 1-5 are ve
 
 ## Agreed file organization and scope
 
-- Keep `main.py`, `utils.py`, and `README.md` at the root. The plan now resides at `docs/MIGRATION_PLAN.md`; retain that existing location. Keep the two existing cogs and their command organization unchanged during this phase.
+- Keep `main.py` and `README.md` at the root; shared helpers now live in `utils/utils.py` with a package marker in `utils/__init__.py`. The plan now resides at `docs/MIGRATION_PLAN.md`; retain that existing location. Keep the two existing cogs and their command organization unchanged during this phase.
 - Database access lives in `db/settings.py`, `db/warnings.py`, and `db/blacklists.py`, with `db/__init__.py` identifying the package. This supersedes the original proposal to add Phase 2 helpers to `utils.py`.
 - Validated deployment configuration lives in `config/config.py`; `.env.example` contains placeholders only. Loading `.env` happens at explicit startup, not import time.
 - Keep automated checks locally in `tests/`, which is now ignored and untracked by Git. Additional documentation and maintained one-off tools may later go in `docs/` and `scripts/`, but do not create empty folders.
@@ -34,7 +34,7 @@ Current checkpoint: All six PostgreSQL phases are implemented. Phases 1-5 are ve
 
 ## Current schema
 
-The following matches `utils.py:init_db()` as of the last update. The statements run through an acquired pool connection, sequentially, without an explicit enclosing transaction.
+The following matches `utils/utils.py:init_db()` as of the last update. The statements run through an acquired pool connection, sequentially, without an explicit enclosing transaction.
 
 ```sql
 CREATE TABLE IF NOT EXISTS guild_settings (
@@ -282,3 +282,9 @@ Regression verification: `tests/test_review_fixes.py` contains six passing offli
 | 2026-10-03 | Owner verified and approved Phase 4. Implemented Phase 5 blacklist commands and DB-backed in-memory AutoMod cache. | All 55 tests passed, including eleven isolated PostgreSQL integration tests. Cache lifecycle/single-process assumptions documented; JSON helpers/files untouched. Awaiting owner verification before Phase 6. |
 | 2026-10-03 | Owner verified and approved Phase 5. Completed Phase 6 legacy storage removal and current setup documentation. | All 56 tests passed, including twelve isolated PostgreSQL integration tests, with data files absent. All six phases implemented; Phase 6 final owner review pending. Full uv project migration and deferred work remain separate. |
 | 2026-10-04 | Completed the separately authorized uv migration: project metadata, Python selection, lockfile, dependency audit, updated setup instructions, and removal of requirements.txt after verification. | uv sync succeeded; all 56 tests passed; live Neon/Discord startup and slash sync succeeded. Bot stopped after readiness. Owner review pending. |
+
+## Post-migration organization and runtime verification (2026-10-04)
+
+- **Local hosting documentation:** README now explicitly describes local-only bot uptime, no active 24/7 hosting, and independent Neon persistence. Local setup still uses `uv sync` / `uv run main.py`.
+- **Docker:** Added Dockerfile and .dockerignore. Python 3.13.5 slim, pinned uv 0.12.5 builder, locked production dependency sync, non-root runtime, and explicit application copies. Build succeeded; live container startup connected to Neon and Discord, loaded both cogs, and synchronized commands. Runtime inspection confirmed UID 10001 and no bundled .env, Git, tests, or uv binary. Container stopped and removed after verification; this does not establish 24/7 hosting.
+- **Utils package:** Moved the implementation unchanged to `utils/utils.py`, added `utils/__init__.py`, and updated application/test imports and test mock paths. All 56 tests passed, including twelve PostgreSQL integration tests. Local `uv run main.py` also connected to Neon/Discord, loaded both cogs, and synced commands; it was stopped before the Docker smoke test. Disposable test database removed. No command or data-access behavior changed.
